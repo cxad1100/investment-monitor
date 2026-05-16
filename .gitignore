@@ -1,2 +1,4 @@
 .venv/
 .env
+data/collect.log
+__pycache__/
