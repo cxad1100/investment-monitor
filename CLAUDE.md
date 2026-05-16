@@ -5,44 +5,76 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Running
 
 ```bash
-pip install -r requirements.txt
-# Set API keys in .env (copy from .env template)
-python main.py
-python main.py --universe data/tr_universe.csv --period 1y --output portfolio_report.json
+# Install dependencies (requires uv: brew install uv)
+uv venv .venv --python 3.13 && uv pip install -r requirements.txt --python .venv
+source .venv/bin/activate
+
+# Collect all signals (full run, ~20 min)
+python collect_all.py
+
+# Fast test mode (50 tickers, skips validation, ~5 min)
+python collect_all.py --fast
+
+# Run tests
+.venv/bin/pytest tests/ -v
 ```
 
 ## Architecture
 
-4-agent sequential pipeline. Each agent uses Claude API tool-use loop and writes to a shared `state` dict.
+Two-pass weekly pipeline running every Sunday 7pm (Rome time) via Claude Code remote agent:
+
+**Pass 1 (Python):** `collect_all.py` → 9 collectors → `data/signals.json`
+**Pass 2 (Claude):** Reads `signals.json` → extracts events → rates all assets → `data/ratings_report.json`
 
 ```
-main.py → pipeline.py → [data_engineer → macro_analyst → fundamental_analyst → portfolio_manager]
-                                ↕              ↕                  ↕                  ↕
-                          state["universe"] state["regime"]  state["ratings"]  state["portfolio"]
-                          state["price_data"]
-                          state["fundamentals"]
-                          state["fred_data"]
+data/universe.csv        ← all TR stocks + ETFs (auto-refreshed weekly)
+     │
+collect_all.py (9 collectors in sequence)
+     │
+data/signals.json        ← compact signal snapshot (~15KB)
+     │
+[Claude Code session]    ← extracts events A/B/C..., rates each asset
+     │
+data/ratings_report.json ← S&P-style grades + event portfolio matrix
 ```
 
-**Agents** (`agents/`): Each agent has a system prompt, Claude API tool definitions, a tool executor (`_execute_tool`), and a `run(state) → state` function. Agents loop on `client.messages.create()` until `stop_reason == "end_turn"`.
+## Signal Sources
 
-**Tools** (`tools/`):
-- `universe.py` — loads `data/tr_universe.csv`, maps ISINs to yfinance tickers
-- `yfinance_tools.py` — price history, fundamentals, position sizing, portfolio stats
-- `fred_tools.py` — FRED API fetch, quantitative regime classifier
+| # | Collector | Source | Key Signal |
+|---|---|---|---|
+| 1 | UniverseManager | Wikipedia S&P 500 + seed European/ETF lists | Full TR asset list |
+| 2 | Macro/FRED | fredapi | Regime + rates + CPI + yield curve |
+| 3 | Futures | yfinance CL=F GC=F NG=F HG=F | Sector tailwinds/headwinds |
+| 4 | Polymarket | gamma-api.polymarket.com | Event probabilities |
+| 5 | GDELT | api.gdeltproject.org | Regional conflict indices |
+| 6 | News | Reuters RSS | Sector headlines |
+| 7 | InsiderFlow | SEC EDGAR Form 4 | Net insider buys/sells |
+| 8 | OptionsFlow | yfinance options chain | Put-call ratio |
+| 9 | ShortInterest | yfinance shortPercentOfFloat | Short float % |
+| + | WSB | reddit.com/r/wallstreetbets | Ticker mentions, squeeze flags |
+| + | BTC | yfinance BTC-USD | Liquidity/risk-on signal |
 
-**Config** (`config.py`): model ID, FRED series list, risk rules, sector weights by regime.
+## Event Framework
 
-## Adding Custom Stocks
+Events A/B/C… extracted by Claude from Polymarket + GDELT + news. Each has P(event) + P(¬event). `event_extractor.py` enforces coherence (no contradictions, mutual exclusivity). Claude maps events to TR assets via multi-hop causal chains.
 
-Edit `data/tr_universe.csv` or supply your own TR CSV export. Required columns: `isin, name, yf_ticker, sector, region`. The `yf_ticker` can be omitted — it's derived from the ISIN country prefix + region suffix.
+## Rating Scale
 
-## API Keys
+AAA / AA+ / AA / AA- / A+ / A / A- / BBB+ / BBB / BBB- / BB+ / BB / BB- / B / CCC / CC
 
-Both keys are required. Add to `.env`:
-- `ANTHROPIC_API_KEY` — from console.anthropic.com
-- `FRED_API_KEY` — free at fred.stlouisfed.org/docs/api/api_key.html
+Fast scorer (Python): composite 0-100 → grade. Deep rating (Claude): rationale + event exposures for top movers.
 
-## Model
+## Data Files
 
-Uses `claude-opus-4-7` with `thinking: {type: "adaptive"}`. Change in `config.py → MODEL`.
+| File | Updated | Contents |
+|---|---|---|
+| `data/universe.csv` | Weekly | All TR assets (stocks + ETFs) |
+| `data/signals.json` | Weekly | All 9 signal outputs |
+| `data/ratings_report.json` | Weekly | Final S&P-style grades |
+| `data/last_ratings.json` | Weekly | Previous week grades (for change detection) |
+
+## Tests
+
+```bash
+.venv/bin/pytest tests/ -v
+```

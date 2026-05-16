@@ -26,12 +26,16 @@ RISK_RULES = {
     "min_conviction": 50,
 }
 
+DEEP_RATING_THRESHOLD = 70
+TICKER_BATCH_SIZE = 200
+POLYMARKET_MIN_VOLUME = 2000.0
+
 SECTOR_WEIGHTS_BY_REGIME = {
     "growth": {
-        "Technology": 0.28, "Consumer Discretionary": 0.18,
+        "Technology": 0.25, "Consumer Discretionary": 0.18,
         "Financials": 0.15, "Healthcare": 0.12,
         "Industrials": 0.10, "Consumer Staples": 0.08,
-        "Communication Services": 0.05, "Utilities": 0.02, "Other": 0.02,
+        "Communication Services": 0.05, "Utilities": 0.02, "Other": 0.05,
     },
     "inflation": {
         "Energy": 0.20, "Materials": 0.15, "Financials": 0.15,
