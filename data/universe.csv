@@ -1,0 +1,549 @@
+isin,name,yf_ticker,type,sector,region,added_date
+,3M,MMM,stock,Industrials,US,2026-05-16T19:08:18.122846
+,A. O. Smith,AOS,stock,Industrials,US,2026-05-16T19:08:18.122876
+,Abbott Laboratories,ABT,stock,Health Care,US,2026-05-16T19:08:18.122897
+,AbbVie,ABBV,stock,Health Care,US,2026-05-16T19:08:18.122914
+,Accenture,ACN,stock,Information Technology,US,2026-05-16T19:08:18.122931
+,Adobe Inc.,ADBE,stock,Information Technology,US,2026-05-16T19:08:18.122946
+,Advanced Micro Devices,AMD,stock,Information Technology,US,2026-05-16T19:08:18.122961
+,AES Corporation,AES,stock,Utilities,US,2026-05-16T19:08:18.122975
+,Aflac,AFL,stock,Financials,US,2026-05-16T19:08:18.122989
+,Agilent Technologies,A,stock,Health Care,US,2026-05-16T19:08:18.123003
+,Air Products,APD,stock,Materials,US,2026-05-16T19:08:18.123017
+,Airbnb,ABNB,stock,Consumer Discretionary,US,2026-05-16T19:08:18.123031
+,Akamai Technologies,AKAM,stock,Information Technology,US,2026-05-16T19:08:18.123044
+,Albemarle Corporation,ALB,stock,Materials,US,2026-05-16T19:08:18.123058
+,Alexandria Real Estate Equities,ARE,stock,Real Estate,US,2026-05-16T19:08:18.123071
+,Align Technology,ALGN,stock,Health Care,US,2026-05-16T19:08:18.123084
+,Allegion,ALLE,stock,Industrials,US,2026-05-16T19:08:18.123098
+,Alliant Energy,LNT,stock,Utilities,US,2026-05-16T19:08:18.123111
+,Allstate,ALL,stock,Financials,US,2026-05-16T19:08:18.123124
+,Alphabet Inc. (Class A),GOOGL,stock,Communication Services,US,2026-05-16T19:08:18.123138
+,Alphabet Inc. (Class C),GOOG,stock,Communication Services,US,2026-05-16T19:08:18.123151
+,Altria,MO,stock,Consumer Staples,US,2026-05-16T19:08:18.123164
+,Amazon,AMZN,stock,Consumer Discretionary,US,2026-05-16T19:08:18.123177
+,Amcor,AMCR,stock,Materials,US,2026-05-16T19:08:18.123190
+,Ameren,AEE,stock,Utilities,US,2026-05-16T19:08:18.123204
+,American Electric Power,AEP,stock,Utilities,US,2026-05-16T19:08:18.123217
+,American Express,AXP,stock,Financials,US,2026-05-16T19:08:18.123230
+,American International Group,AIG,stock,Financials,US,2026-05-16T19:08:18.123243
+,American Tower,AMT,stock,Real Estate,US,2026-05-16T19:08:18.123257
+,American Water Works,AWK,stock,Utilities,US,2026-05-16T19:08:18.123270
+,Ameriprise Financial,AMP,stock,Financials,US,2026-05-16T19:08:18.123283
+,Ametek,AME,stock,Industrials,US,2026-05-16T19:08:18.123296
+,Amgen,AMGN,stock,Health Care,US,2026-05-16T19:08:18.123309
+,Amphenol,APH,stock,Information Technology,US,2026-05-16T19:08:18.123322
+,Analog Devices,ADI,stock,Information Technology,US,2026-05-16T19:08:18.123335
+,Aon plc,AON,stock,Financials,US,2026-05-16T19:08:18.123348
+,APA Corporation,APA,stock,Energy,US,2026-05-16T19:08:18.123360
+,Apollo Global Management,APO,stock,Financials,US,2026-05-16T19:08:18.123373
+,Apple Inc.,AAPL,stock,Information Technology,US,2026-05-16T19:08:18.123386
+,Applied Materials,AMAT,stock,Information Technology,US,2026-05-16T19:08:18.123399
+,AppLovin,APP,stock,Information Technology,US,2026-05-16T19:08:18.123412
+,Aptiv,APTV,stock,Consumer Discretionary,US,2026-05-16T19:08:18.123425
+,Arch Capital Group,ACGL,stock,Financials,US,2026-05-16T19:08:18.123438
+,Archer Daniels Midland,ADM,stock,Consumer Staples,US,2026-05-16T19:08:18.123451
+,Ares Management,ARES,stock,Financials,US,2026-05-16T19:08:18.123464
+,Arista Networks,ANET,stock,Information Technology,US,2026-05-16T19:08:18.123477
+,Arthur J. Gallagher & Co.,AJG,stock,Financials,US,2026-05-16T19:08:18.123490
+,Assurant,AIZ,stock,Financials,US,2026-05-16T19:08:18.123503
+,AT&T,T,stock,Communication Services,US,2026-05-16T19:08:18.123516
+,Atmos Energy,ATO,stock,Utilities,US,2026-05-16T19:08:18.123529
+,Autodesk,ADSK,stock,Information Technology,US,2026-05-16T19:08:18.123543
+,Automatic Data Processing,ADP,stock,Industrials,US,2026-05-16T19:08:18.123556
+,AutoZone,AZO,stock,Consumer Discretionary,US,2026-05-16T19:08:18.123569
+,AvalonBay Communities,AVB,stock,Real Estate,US,2026-05-16T19:08:18.123582
+,Avery Dennison,AVY,stock,Materials,US,2026-05-16T19:08:18.123595
+,Axon Enterprise,AXON,stock,Industrials,US,2026-05-16T19:08:18.123608
+,Baker Hughes,BKR,stock,Energy,US,2026-05-16T19:08:18.123621
+,Ball Corporation,BALL,stock,Materials,US,2026-05-16T19:08:18.123633
+,Bank of America,BAC,stock,Financials,US,2026-05-16T19:08:18.123646
+,Baxter International,BAX,stock,Health Care,US,2026-05-16T19:08:18.123659
+,Becton Dickinson,BDX,stock,Health Care,US,2026-05-16T19:08:18.123672
+,Berkshire Hathaway,BRK-B,stock,Financials,US,2026-05-16T19:08:18.123685
+,Best Buy,BBY,stock,Consumer Discretionary,US,2026-05-16T19:08:18.123698
+,Bio-Techne,TECH,stock,Health Care,US,2026-05-16T19:08:18.123711
+,Biogen,BIIB,stock,Health Care,US,2026-05-16T19:08:18.123723
+,BlackRock,BLK,stock,Financials,US,2026-05-16T19:08:18.123737
+,Blackstone Inc.,BX,stock,Financials,US,2026-05-16T19:08:18.123749
+,"Block, Inc.",XYZ,stock,Financials,US,2026-05-16T19:08:18.123762
+,BNY Mellon,BK,stock,Financials,US,2026-05-16T19:08:18.123775
+,Boeing,BA,stock,Industrials,US,2026-05-16T19:08:18.123787
+,Booking Holdings,BKNG,stock,Consumer Discretionary,US,2026-05-16T19:08:18.123800
+,Boston Scientific,BSX,stock,Health Care,US,2026-05-16T19:08:18.123813
+,Bristol Myers Squibb,BMY,stock,Health Care,US,2026-05-16T19:08:18.123827
+,Broadcom,AVGO,stock,Information Technology,US,2026-05-16T19:08:18.123841
+,Broadridge Financial Solutions,BR,stock,Industrials,US,2026-05-16T19:08:18.123854
+,Brown & Brown,BRO,stock,Financials,US,2026-05-16T19:08:18.123866
+,Brown–Forman,BF-B,stock,Consumer Staples,US,2026-05-16T19:08:18.123880
+,Builders FirstSource,BLDR,stock,Industrials,US,2026-05-16T19:08:18.123893
+,Bunge Global,BG,stock,Consumer Staples,US,2026-05-16T19:08:18.123906
+,"BXP, Inc.",BXP,stock,Real Estate,US,2026-05-16T19:08:18.123919
+,C.H. Robinson,CHRW,stock,Industrials,US,2026-05-16T19:08:18.123931
+,Cadence Design Systems,CDNS,stock,Information Technology,US,2026-05-16T19:08:18.123944
+,Camden Property Trust,CPT,stock,Real Estate,US,2026-05-16T19:08:18.123957
+,Campbell's Company (The),CPB,stock,Consumer Staples,US,2026-05-16T19:08:18.123970
+,Capital One,COF,stock,Financials,US,2026-05-16T19:08:18.123984
+,Cardinal Health,CAH,stock,Health Care,US,2026-05-16T19:08:18.123996
+,Carnival Corporation,CCL,stock,Consumer Discretionary,US,2026-05-16T19:08:18.124009
+,Carrier Global,CARR,stock,Industrials,US,2026-05-16T19:08:18.124022
+,Carvana,CVNA,stock,Consumer Discretionary,US,2026-05-16T19:08:18.124035
+,Casey's,CASY,stock,Consumer Staples,US,2026-05-16T19:08:18.124047
+,Caterpillar Inc.,CAT,stock,Industrials,US,2026-05-16T19:08:18.124060
+,Cboe Global Markets,CBOE,stock,Financials,US,2026-05-16T19:08:18.124072
+,CBRE Group,CBRE,stock,Real Estate,US,2026-05-16T19:08:18.124085
+,CDW Corporation,CDW,stock,Information Technology,US,2026-05-16T19:08:18.124099
+,Cencora,COR,stock,Health Care,US,2026-05-16T19:08:18.124111
+,Centene Corporation,CNC,stock,Health Care,US,2026-05-16T19:08:18.124124
+,CenterPoint Energy,CNP,stock,Utilities,US,2026-05-16T19:08:18.124137
+,CF Industries,CF,stock,Materials,US,2026-05-16T19:08:18.124150
+,Charles River Laboratories,CRL,stock,Health Care,US,2026-05-16T19:08:18.124163
+,Charles Schwab Corporation,SCHW,stock,Financials,US,2026-05-16T19:08:18.124176
+,Charter Communications,CHTR,stock,Communication Services,US,2026-05-16T19:08:18.124189
+,Chevron Corporation,CVX,stock,Energy,US,2026-05-16T19:08:18.124202
+,Chipotle Mexican Grill,CMG,stock,Consumer Discretionary,US,2026-05-16T19:08:18.124215
+,Chubb Limited,CB,stock,Financials,US,2026-05-16T19:08:18.124228
+,Church & Dwight,CHD,stock,Consumer Staples,US,2026-05-16T19:08:18.124240
+,Ciena,CIEN,stock,Information Technology,US,2026-05-16T19:08:18.124253
+,Cigna,CI,stock,Health Care,US,2026-05-16T19:08:18.124265
+,Cincinnati Financial,CINF,stock,Financials,US,2026-05-16T19:08:18.124278
+,Cintas,CTAS,stock,Industrials,US,2026-05-16T19:08:18.124291
+,Cisco,CSCO,stock,Information Technology,US,2026-05-16T19:08:18.124305
+,Citigroup,C,stock,Financials,US,2026-05-16T19:08:18.124318
+,Citizens Financial Group,CFG,stock,Financials,US,2026-05-16T19:08:18.124330
+,Clorox,CLX,stock,Consumer Staples,US,2026-05-16T19:08:18.124343
+,CME Group,CME,stock,Financials,US,2026-05-16T19:08:18.124356
+,CMS Energy,CMS,stock,Utilities,US,2026-05-16T19:08:18.124370
+,Coca-Cola Company (The),KO,stock,Consumer Staples,US,2026-05-16T19:08:18.124382
+,Cognizant,CTSH,stock,Information Technology,US,2026-05-16T19:08:18.124395
+,Coherent Corp.,COHR,stock,Information Technology,US,2026-05-16T19:08:18.124408
+,Coinbase,COIN,stock,Financials,US,2026-05-16T19:08:18.124420
+,Colgate-Palmolive,CL,stock,Consumer Staples,US,2026-05-16T19:08:18.124433
+,Comcast,CMCSA,stock,Communication Services,US,2026-05-16T19:08:18.124446
+,Comfort Systems USA,FIX,stock,Industrials,US,2026-05-16T19:08:18.124459
+,Conagra Brands,CAG,stock,Consumer Staples,US,2026-05-16T19:08:18.124471
+,ConocoPhillips,COP,stock,Energy,US,2026-05-16T19:08:18.124484
+,Consolidated Edison,ED,stock,Utilities,US,2026-05-16T19:08:18.124496
+,Constellation Brands,STZ,stock,Consumer Staples,US,2026-05-16T19:08:18.124509
+,Constellation Energy,CEG,stock,Utilities,US,2026-05-16T19:08:18.124522
+,Cooper Companies (The),COO,stock,Health Care,US,2026-05-16T19:08:18.124534
+,Copart,CPRT,stock,Industrials,US,2026-05-16T19:08:18.124547
+,Corning Inc.,GLW,stock,Information Technology,US,2026-05-16T19:08:18.124560
+,Corpay,CPAY,stock,Financials,US,2026-05-16T19:08:18.124573
+,Corteva,CTVA,stock,Materials,US,2026-05-16T19:08:18.124585
+,CoStar Group,CSGP,stock,Real Estate,US,2026-05-16T19:08:18.124598
+,Costco,COST,stock,Consumer Staples,US,2026-05-16T19:08:18.124611
+,CRH plc,CRH,stock,Materials,US,2026-05-16T19:08:18.124624
+,CrowdStrike,CRWD,stock,Information Technology,US,2026-05-16T19:08:18.124637
+,Crown Castle,CCI,stock,Real Estate,US,2026-05-16T19:08:18.124650
+,CSX Corporation,CSX,stock,Industrials,US,2026-05-16T19:08:18.124662
+,Cummins,CMI,stock,Industrials,US,2026-05-16T19:08:18.124675
+,CVS Health,CVS,stock,Health Care,US,2026-05-16T19:08:18.124688
+,Danaher Corporation,DHR,stock,Health Care,US,2026-05-16T19:08:18.124700
+,Darden Restaurants,DRI,stock,Consumer Discretionary,US,2026-05-16T19:08:18.124713
+,Datadog,DDOG,stock,Information Technology,US,2026-05-16T19:08:18.124726
+,DaVita,DVA,stock,Health Care,US,2026-05-16T19:08:18.124738
+,Deckers Brands,DECK,stock,Consumer Discretionary,US,2026-05-16T19:08:18.124751
+,Deere & Company,DE,stock,Industrials,US,2026-05-16T19:08:18.124764
+,Dell Technologies,DELL,stock,Information Technology,US,2026-05-16T19:08:18.124776
+,Delta Air Lines,DAL,stock,Industrials,US,2026-05-16T19:08:18.124789
+,Devon Energy,DVN,stock,Energy,US,2026-05-16T19:08:18.124802
+,Dexcom,DXCM,stock,Health Care,US,2026-05-16T19:08:18.124815
+,Diamondback Energy,FANG,stock,Energy,US,2026-05-16T19:08:18.124829
+,Digital Realty,DLR,stock,Real Estate,US,2026-05-16T19:08:18.124843
+,Dollar General,DG,stock,Consumer Staples,US,2026-05-16T19:08:18.124856
+,Dollar Tree,DLTR,stock,Consumer Staples,US,2026-05-16T19:08:18.124868
+,Dominion Energy,D,stock,Utilities,US,2026-05-16T19:08:18.124881
+,Domino's,DPZ,stock,Consumer Discretionary,US,2026-05-16T19:08:18.124894
+,DoorDash,DASH,stock,Consumer Discretionary,US,2026-05-16T19:08:18.124907
+,Dover Corporation,DOV,stock,Industrials,US,2026-05-16T19:08:18.124919
+,Dow Inc.,DOW,stock,Materials,US,2026-05-16T19:08:18.124932
+,D. R. Horton,DHI,stock,Consumer Discretionary,US,2026-05-16T19:08:18.124945
+,DTE Energy,DTE,stock,Utilities,US,2026-05-16T19:08:18.124958
+,Duke Energy,DUK,stock,Utilities,US,2026-05-16T19:08:18.124970
+,DuPont,DD,stock,Materials,US,2026-05-16T19:08:18.124983
+,Eaton Corporation,ETN,stock,Industrials,US,2026-05-16T19:08:18.124996
+,eBay Inc.,EBAY,stock,Consumer Discretionary,US,2026-05-16T19:08:18.125009
+,EchoStar,SATS,stock,Communication Services,US,2026-05-16T19:08:18.125022
+,Ecolab,ECL,stock,Materials,US,2026-05-16T19:08:18.125034
+,Edison International,EIX,stock,Utilities,US,2026-05-16T19:08:18.125047
+,Edwards Lifesciences,EW,stock,Health Care,US,2026-05-16T19:08:18.125060
+,Electronic Arts,EA,stock,Communication Services,US,2026-05-16T19:08:18.125072
+,Elevance Health,ELV,stock,Health Care,US,2026-05-16T19:08:18.125085
+,Emcor,EME,stock,Industrials,US,2026-05-16T19:08:18.125097
+,Emerson Electric,EMR,stock,Industrials,US,2026-05-16T19:08:18.125110
+,Entergy,ETR,stock,Utilities,US,2026-05-16T19:08:18.125123
+,EOG Resources,EOG,stock,Energy,US,2026-05-16T19:08:18.125135
+,EPAM Systems,EPAM,stock,Information Technology,US,2026-05-16T19:08:18.125148
+,EQT Corporation,EQT,stock,Energy,US,2026-05-16T19:08:18.125161
+,Equifax,EFX,stock,Industrials,US,2026-05-16T19:08:18.125174
+,Equinix,EQIX,stock,Real Estate,US,2026-05-16T19:08:18.125186
+,Equity Residential,EQR,stock,Real Estate,US,2026-05-16T19:08:18.125198
+,Erie Indemnity,ERIE,stock,Financials,US,2026-05-16T19:08:18.125211
+,Essex Property Trust,ESS,stock,Real Estate,US,2026-05-16T19:08:18.125224
+,Estée Lauder Companies (The),EL,stock,Consumer Staples,US,2026-05-16T19:08:18.125236
+,Everest Group,EG,stock,Financials,US,2026-05-16T19:08:18.125249
+,Evergy,EVRG,stock,Utilities,US,2026-05-16T19:08:18.125262
+,Eversource Energy,ES,stock,Utilities,US,2026-05-16T19:08:18.125275
+,Exelon,EXC,stock,Utilities,US,2026-05-16T19:08:18.125287
+,Expand Energy,EXE,stock,Energy,US,2026-05-16T19:08:18.125299
+,Expedia Group,EXPE,stock,Consumer Discretionary,US,2026-05-16T19:08:18.125312
+,Expeditors International,EXPD,stock,Industrials,US,2026-05-16T19:08:18.125325
+,Extra Space Storage,EXR,stock,Real Estate,US,2026-05-16T19:08:18.125338
+,ExxonMobil,XOM,stock,Energy,US,2026-05-16T19:08:18.125350
+,"F5, Inc.",FFIV,stock,Information Technology,US,2026-05-16T19:08:18.125363
+,FactSet,FDS,stock,Financials,US,2026-05-16T19:08:18.125375
+,Fair Isaac,FICO,stock,Information Technology,US,2026-05-16T19:08:18.125388
+,Fastenal,FAST,stock,Industrials,US,2026-05-16T19:08:18.125401
+,Federal Realty Investment Trust,FRT,stock,Real Estate,US,2026-05-16T19:08:18.125414
+,FedEx,FDX,stock,Industrials,US,2026-05-16T19:08:18.125426
+,Fidelity National Information Services,FIS,stock,Financials,US,2026-05-16T19:08:18.125439
+,Fifth Third Bancorp,FITB,stock,Financials,US,2026-05-16T19:08:18.125452
+,First Solar,FSLR,stock,Information Technology,US,2026-05-16T19:08:18.125464
+,FirstEnergy,FE,stock,Utilities,US,2026-05-16T19:08:18.125477
+,Fiserv,FISV,stock,Financials,US,2026-05-16T19:08:18.125490
+,Ford Motor Company,F,stock,Consumer Discretionary,US,2026-05-16T19:08:18.125503
+,Fortinet,FTNT,stock,Information Technology,US,2026-05-16T19:08:18.125516
+,Fortive,FTV,stock,Industrials,US,2026-05-16T19:08:18.125528
+,Fox Corporation (Class A),FOXA,stock,Communication Services,US,2026-05-16T19:08:18.125541
+,Fox Corporation (Class B),FOX,stock,Communication Services,US,2026-05-16T19:08:18.125554
+,Franklin Resources,BEN,stock,Financials,US,2026-05-16T19:08:18.125566
+,Freeport-McMoRan,FCX,stock,Materials,US,2026-05-16T19:08:18.125579
+,Garmin,GRMN,stock,Consumer Discretionary,US,2026-05-16T19:08:18.125591
+,Gartner,IT,stock,Information Technology,US,2026-05-16T19:08:18.125604
+,GE Aerospace,GE,stock,Industrials,US,2026-05-16T19:08:18.125617
+,GE HealthCare,GEHC,stock,Health Care,US,2026-05-16T19:08:18.125629
+,GE Vernova,GEV,stock,Industrials,US,2026-05-16T19:08:18.125642
+,Gen Digital,GEN,stock,Information Technology,US,2026-05-16T19:08:18.125657
+,Generac,GNRC,stock,Industrials,US,2026-05-16T19:08:18.125670
+,General Dynamics,GD,stock,Industrials,US,2026-05-16T19:08:18.125683
+,General Mills,GIS,stock,Consumer Staples,US,2026-05-16T19:08:18.125696
+,General Motors,GM,stock,Consumer Discretionary,US,2026-05-16T19:08:18.125708
+,Genuine Parts Company,GPC,stock,Consumer Discretionary,US,2026-05-16T19:08:18.125721
+,Gilead Sciences,GILD,stock,Health Care,US,2026-05-16T19:08:18.125734
+,Global Payments,GPN,stock,Financials,US,2026-05-16T19:08:18.125747
+,Globe Life,GL,stock,Financials,US,2026-05-16T19:08:18.125760
+,GoDaddy,GDDY,stock,Information Technology,US,2026-05-16T19:08:18.125772
+,Goldman Sachs,GS,stock,Financials,US,2026-05-16T19:08:18.125785
+,Halliburton,HAL,stock,Energy,US,2026-05-16T19:08:18.125798
+,Hartford (The),HIG,stock,Financials,US,2026-05-16T19:08:18.125810
+,Hasbro,HAS,stock,Consumer Discretionary,US,2026-05-16T19:08:18.125828
+,HCA Healthcare,HCA,stock,Health Care,US,2026-05-16T19:08:18.125841
+,Healthpeak Properties,DOC,stock,Real Estate,US,2026-05-16T19:08:18.125854
+,Henry Schein,HSIC,stock,Health Care,US,2026-05-16T19:08:18.125867
+,Hershey Company (The),HSY,stock,Consumer Staples,US,2026-05-16T19:08:18.125879
+,Hewlett Packard Enterprise,HPE,stock,Information Technology,US,2026-05-16T19:08:18.125892
+,Hilton Worldwide,HLT,stock,Consumer Discretionary,US,2026-05-16T19:08:18.125905
+,Home Depot (The),HD,stock,Consumer Discretionary,US,2026-05-16T19:08:18.125918
+,Honeywell,HON,stock,Industrials,US,2026-05-16T19:08:18.125931
+,Hormel Foods,HRL,stock,Consumer Staples,US,2026-05-16T19:08:18.125943
+,Host Hotels & Resorts,HST,stock,Real Estate,US,2026-05-16T19:08:18.125956
+,Howmet Aerospace,HWM,stock,Industrials,US,2026-05-16T19:08:18.125969
+,HP Inc.,HPQ,stock,Information Technology,US,2026-05-16T19:08:18.125982
+,Hubbell Incorporated,HUBB,stock,Industrials,US,2026-05-16T19:08:18.125995
+,Humana,HUM,stock,Health Care,US,2026-05-16T19:08:18.126008
+,Huntington Bancshares,HBAN,stock,Financials,US,2026-05-16T19:08:18.126020
+,Huntington Ingalls Industries,HII,stock,Industrials,US,2026-05-16T19:08:18.126042
+,IBM,IBM,stock,Information Technology,US,2026-05-16T19:08:18.126055
+,IDEX Corporation,IEX,stock,Industrials,US,2026-05-16T19:08:18.126068
+,Idexx Laboratories,IDXX,stock,Health Care,US,2026-05-16T19:08:18.126080
+,Illinois Tool Works,ITW,stock,Industrials,US,2026-05-16T19:08:18.126093
+,Incyte,INCY,stock,Health Care,US,2026-05-16T19:08:18.126106
+,Ingersoll Rand,IR,stock,Industrials,US,2026-05-16T19:08:18.126119
+,Insulet Corporation,PODD,stock,Health Care,US,2026-05-16T19:08:18.126131
+,Intel,INTC,stock,Information Technology,US,2026-05-16T19:08:18.126144
+,Interactive Brokers,IBKR,stock,Financials,US,2026-05-16T19:08:18.126157
+,Intercontinental Exchange,ICE,stock,Financials,US,2026-05-16T19:08:18.126169
+,International Flavors & Fragrances,IFF,stock,Materials,US,2026-05-16T19:08:18.126182
+,International Paper,IP,stock,Materials,US,2026-05-16T19:08:18.126195
+,Intuit,INTU,stock,Information Technology,US,2026-05-16T19:08:18.126209
+,Intuitive Surgical,ISRG,stock,Health Care,US,2026-05-16T19:08:18.126222
+,Invesco,IVZ,stock,Financials,US,2026-05-16T19:08:18.126235
+,Invitation Homes,INVH,stock,Real Estate,US,2026-05-16T19:08:18.126248
+,IQVIA,IQV,stock,Health Care,US,2026-05-16T19:08:18.126261
+,Iron Mountain,IRM,stock,Real Estate,US,2026-05-16T19:08:18.126273
+,J.B. Hunt,JBHT,stock,Industrials,US,2026-05-16T19:08:18.126286
+,Jabil,JBL,stock,Information Technology,US,2026-05-16T19:08:18.126299
+,Jack Henry & Associates,JKHY,stock,Financials,US,2026-05-16T19:08:18.126312
+,Jacobs Solutions,J,stock,Industrials,US,2026-05-16T19:08:18.126325
+,Johnson & Johnson,JNJ,stock,Health Care,US,2026-05-16T19:08:18.126338
+,Johnson Controls,JCI,stock,Industrials,US,2026-05-16T19:08:18.126351
+,JPMorgan Chase,JPM,stock,Financials,US,2026-05-16T19:08:18.126364
+,Kenvue,KVUE,stock,Consumer Staples,US,2026-05-16T19:08:18.126376
+,Keurig Dr Pepper,KDP,stock,Consumer Staples,US,2026-05-16T19:08:18.126389
+,KeyCorp,KEY,stock,Financials,US,2026-05-16T19:08:18.126404
+,Keysight Technologies,KEYS,stock,Information Technology,US,2026-05-16T19:08:18.126417
+,Kimberly-Clark,KMB,stock,Consumer Staples,US,2026-05-16T19:08:18.126430
+,Kimco Realty,KIM,stock,Real Estate,US,2026-05-16T19:08:18.126443
+,Kinder Morgan,KMI,stock,Energy,US,2026-05-16T19:08:18.126456
+,KKR & Co.,KKR,stock,Financials,US,2026-05-16T19:08:18.126468
+,KLA Corporation,KLAC,stock,Information Technology,US,2026-05-16T19:08:18.126481
+,Kraft Heinz,KHC,stock,Consumer Staples,US,2026-05-16T19:08:18.126494
+,Kroger,KR,stock,Consumer Staples,US,2026-05-16T19:08:18.126507
+,L3Harris,LHX,stock,Industrials,US,2026-05-16T19:08:18.126520
+,Labcorp,LH,stock,Health Care,US,2026-05-16T19:08:18.126532
+,Lam Research,LRCX,stock,Information Technology,US,2026-05-16T19:08:18.126545
+,Las Vegas Sands,LVS,stock,Consumer Discretionary,US,2026-05-16T19:08:18.126558
+,Leidos,LDOS,stock,Industrials,US,2026-05-16T19:08:18.126571
+,Lennar,LEN,stock,Consumer Discretionary,US,2026-05-16T19:08:18.126583
+,Lennox International,LII,stock,Industrials,US,2026-05-16T19:08:18.126596
+,Lilly (Eli),LLY,stock,Health Care,US,2026-05-16T19:08:18.126609
+,Linde plc,LIN,stock,Materials,US,2026-05-16T19:08:18.126622
+,Live Nation Entertainment,LYV,stock,Communication Services,US,2026-05-16T19:08:18.126635
+,Lockheed Martin,LMT,stock,Industrials,US,2026-05-16T19:08:18.126647
+,Loews Corporation,L,stock,Financials,US,2026-05-16T19:08:18.126660
+,Lowe's,LOW,stock,Consumer Discretionary,US,2026-05-16T19:08:18.126673
+,Lululemon Athletica,LULU,stock,Consumer Discretionary,US,2026-05-16T19:08:18.126686
+,Lumentum,LITE,stock,Information Technology,US,2026-05-16T19:08:18.126699
+,LyondellBasell,LYB,stock,Materials,US,2026-05-16T19:08:18.126712
+,M&T Bank,MTB,stock,Financials,US,2026-05-16T19:08:18.126725
+,Marathon Petroleum,MPC,stock,Energy,US,2026-05-16T19:08:18.126738
+,Marriott International,MAR,stock,Consumer Discretionary,US,2026-05-16T19:08:18.126750
+,Marsh McLennan,MRSH,stock,Financials,US,2026-05-16T19:08:18.126763
+,Martin Marietta Materials,MLM,stock,Materials,US,2026-05-16T19:08:18.126775
+,Masco,MAS,stock,Industrials,US,2026-05-16T19:08:18.126788
+,Mastercard,MA,stock,Financials,US,2026-05-16T19:08:18.126801
+,McCormick & Company,MKC,stock,Consumer Staples,US,2026-05-16T19:08:18.126813
+,McDonald's,MCD,stock,Consumer Discretionary,US,2026-05-16T19:08:18.126826
+,McKesson Corporation,MCK,stock,Health Care,US,2026-05-16T19:08:18.126843
+,Medtronic,MDT,stock,Health Care,US,2026-05-16T19:08:18.126856
+,Merck & Co.,MRK,stock,Health Care,US,2026-05-16T19:08:18.126869
+,Meta Platforms,META,stock,Communication Services,US,2026-05-16T19:08:18.126882
+,MetLife,MET,stock,Financials,US,2026-05-16T19:08:18.126895
+,Mettler Toledo,MTD,stock,Health Care,US,2026-05-16T19:08:18.126908
+,MGM Resorts,MGM,stock,Consumer Discretionary,US,2026-05-16T19:08:18.126920
+,Microchip Technology,MCHP,stock,Information Technology,US,2026-05-16T19:08:18.126933
+,Micron Technology,MU,stock,Information Technology,US,2026-05-16T19:08:18.126945
+,Microsoft,MSFT,stock,Information Technology,US,2026-05-16T19:08:18.126958
+,Mid-America Apartment Communities,MAA,stock,Real Estate,US,2026-05-16T19:08:18.126971
+,Moderna,MRNA,stock,Health Care,US,2026-05-16T19:08:18.126984
+,Molson Coors Beverage Company,TAP,stock,Consumer Staples,US,2026-05-16T19:08:18.126997
+,Mondelez International,MDLZ,stock,Consumer Staples,US,2026-05-16T19:08:18.127010
+,Monolithic Power Systems,MPWR,stock,Information Technology,US,2026-05-16T19:08:18.127023
+,Monster Beverage,MNST,stock,Consumer Staples,US,2026-05-16T19:08:18.127036
+,Moody's Corporation,MCO,stock,Financials,US,2026-05-16T19:08:18.127049
+,Morgan Stanley,MS,stock,Financials,US,2026-05-16T19:08:18.127062
+,Mosaic Company (The),MOS,stock,Materials,US,2026-05-16T19:08:18.127074
+,Motorola Solutions,MSI,stock,Information Technology,US,2026-05-16T19:08:18.127087
+,MSCI Inc.,MSCI,stock,Financials,US,2026-05-16T19:08:18.127100
+,"Nasdaq, Inc.",NDAQ,stock,Financials,US,2026-05-16T19:08:18.127112
+,NetApp,NTAP,stock,Information Technology,US,2026-05-16T19:08:18.127125
+,Netflix,NFLX,stock,Communication Services,US,2026-05-16T19:08:18.127138
+,Newmont,NEM,stock,Materials,US,2026-05-16T19:08:18.127151
+,News Corp (Class A),NWSA,stock,Communication Services,US,2026-05-16T19:08:18.127164
+,News Corp (Class B),NWS,stock,Communication Services,US,2026-05-16T19:08:18.127177
+,NextEra Energy,NEE,stock,Utilities,US,2026-05-16T19:08:18.127190
+,"Nike, Inc.",NKE,stock,Consumer Discretionary,US,2026-05-16T19:08:18.127202
+,NiSource,NI,stock,Utilities,US,2026-05-16T19:08:18.127215
+,Nordson Corporation,NDSN,stock,Industrials,US,2026-05-16T19:08:18.127228
+,Norfolk Southern,NSC,stock,Industrials,US,2026-05-16T19:08:18.127241
+,Northern Trust,NTRS,stock,Financials,US,2026-05-16T19:08:18.127253
+,Northrop Grumman,NOC,stock,Industrials,US,2026-05-16T19:08:18.127266
+,Norwegian Cruise Line Holdings,NCLH,stock,Consumer Discretionary,US,2026-05-16T19:08:18.127279
+,NRG Energy,NRG,stock,Utilities,US,2026-05-16T19:08:18.127292
+,Nucor,NUE,stock,Materials,US,2026-05-16T19:08:18.127305
+,Nvidia,NVDA,stock,Information Technology,US,2026-05-16T19:08:18.127317
+,"NVR, Inc.",NVR,stock,Consumer Discretionary,US,2026-05-16T19:08:18.127330
+,NXP Semiconductors,NXPI,stock,Information Technology,US,2026-05-16T19:08:18.127343
+,O’Reilly Automotive,ORLY,stock,Consumer Discretionary,US,2026-05-16T19:08:18.127356
+,Occidental Petroleum,OXY,stock,Energy,US,2026-05-16T19:08:18.127369
+,Old Dominion,ODFL,stock,Industrials,US,2026-05-16T19:08:18.127381
+,Omnicom Group,OMC,stock,Communication Services,US,2026-05-16T19:08:18.127394
+,ON Semiconductor,ON,stock,Information Technology,US,2026-05-16T19:08:18.127407
+,Oneok,OKE,stock,Energy,US,2026-05-16T19:08:18.127420
+,Oracle Corporation,ORCL,stock,Information Technology,US,2026-05-16T19:08:18.127433
+,Otis Worldwide,OTIS,stock,Industrials,US,2026-05-16T19:08:18.127446
+,Paccar,PCAR,stock,Industrials,US,2026-05-16T19:08:18.127459
+,Packaging Corporation of America,PKG,stock,Materials,US,2026-05-16T19:08:18.127472
+,Palantir Technologies,PLTR,stock,Information Technology,US,2026-05-16T19:08:18.127485
+,Palo Alto Networks,PANW,stock,Information Technology,US,2026-05-16T19:08:18.127497
+,Paramount Skydance Corporation,PSKY,stock,Communication Services,US,2026-05-16T19:08:18.127510
+,Parker Hannifin,PH,stock,Industrials,US,2026-05-16T19:08:18.127523
+,Paychex,PAYX,stock,Industrials,US,2026-05-16T19:08:18.127536
+,PayPal,PYPL,stock,Financials,US,2026-05-16T19:08:18.127549
+,Pentair,PNR,stock,Industrials,US,2026-05-16T19:08:18.127561
+,PepsiCo,PEP,stock,Consumer Staples,US,2026-05-16T19:08:18.127574
+,Pfizer,PFE,stock,Health Care,US,2026-05-16T19:08:18.127587
+,PG&E Corporation,PCG,stock,Utilities,US,2026-05-16T19:08:18.127600
+,Philip Morris International,PM,stock,Consumer Staples,US,2026-05-16T19:08:18.127612
+,Phillips 66,PSX,stock,Energy,US,2026-05-16T19:08:18.127625
+,Pinnacle West Capital,PNW,stock,Utilities,US,2026-05-16T19:08:18.127638
+,PNC Financial Services,PNC,stock,Financials,US,2026-05-16T19:08:18.127651
+,Pool Corporation,POOL,stock,Consumer Discretionary,US,2026-05-16T19:08:18.127664
+,PPG Industries,PPG,stock,Materials,US,2026-05-16T19:08:18.127676
+,PPL Corporation,PPL,stock,Utilities,US,2026-05-16T19:08:18.127689
+,Principal Financial Group,PFG,stock,Financials,US,2026-05-16T19:08:18.127702
+,Procter & Gamble,PG,stock,Consumer Staples,US,2026-05-16T19:08:18.127715
+,Progressive Corporation,PGR,stock,Financials,US,2026-05-16T19:08:18.127728
+,Prologis,PLD,stock,Real Estate,US,2026-05-16T19:08:18.127741
+,Prudential Financial,PRU,stock,Financials,US,2026-05-16T19:08:18.127754
+,Public Service Enterprise Group,PEG,stock,Utilities,US,2026-05-16T19:08:18.127766
+,PTC Inc.,PTC,stock,Information Technology,US,2026-05-16T19:08:18.127779
+,Public Storage,PSA,stock,Real Estate,US,2026-05-16T19:08:18.127792
+,PulteGroup,PHM,stock,Consumer Discretionary,US,2026-05-16T19:08:18.127805
+,Quanta Services,PWR,stock,Industrials,US,2026-05-16T19:08:18.127817
+,Qualcomm,QCOM,stock,Information Technology,US,2026-05-16T19:08:18.127830
+,Quest Diagnostics,DGX,stock,Health Care,US,2026-05-16T19:08:18.127847
+,Qnity Electronics,Q,stock,Information Technology,US,2026-05-16T19:08:18.127861
+,Ralph Lauren Corporation,RL,stock,Consumer Discretionary,US,2026-05-16T19:08:18.127873
+,Raymond James Financial,RJF,stock,Financials,US,2026-05-16T19:08:18.127886
+,RTX Corporation,RTX,stock,Industrials,US,2026-05-16T19:08:18.127899
+,Realty Income,O,stock,Real Estate,US,2026-05-16T19:08:18.127912
+,Regency Centers,REG,stock,Real Estate,US,2026-05-16T19:08:18.127925
+,Regeneron Pharmaceuticals,REGN,stock,Health Care,US,2026-05-16T19:08:18.127938
+,Regions Financial Corporation,RF,stock,Financials,US,2026-05-16T19:08:18.127950
+,Republic Services,RSG,stock,Industrials,US,2026-05-16T19:08:18.127963
+,ResMed,RMD,stock,Health Care,US,2026-05-16T19:08:18.127976
+,Revvity,RVTY,stock,Health Care,US,2026-05-16T19:08:18.127989
+,Robinhood Markets,HOOD,stock,Financials,US,2026-05-16T19:08:18.128001
+,Rockwell Automation,ROK,stock,Industrials,US,2026-05-16T19:08:18.128014
+,"Rollins, Inc.",ROL,stock,Industrials,US,2026-05-16T19:08:18.128027
+,Roper Technologies,ROP,stock,Information Technology,US,2026-05-16T19:08:18.128040
+,Ross Stores,ROST,stock,Consumer Discretionary,US,2026-05-16T19:08:18.128052
+,Royal Caribbean Group,RCL,stock,Consumer Discretionary,US,2026-05-16T19:08:18.128066
+,S&P Global,SPGI,stock,Financials,US,2026-05-16T19:08:18.128079
+,Salesforce,CRM,stock,Information Technology,US,2026-05-16T19:08:18.128091
+,Sandisk,SNDK,stock,Information Technology,US,2026-05-16T19:08:18.128104
+,SBA Communications,SBAC,stock,Real Estate,US,2026-05-16T19:08:18.128117
+,Schlumberger,SLB,stock,Energy,US,2026-05-16T19:08:18.128130
+,Seagate Technology,STX,stock,Information Technology,US,2026-05-16T19:08:18.128142
+,Sempra,SRE,stock,Utilities,US,2026-05-16T19:08:18.128155
+,ServiceNow,NOW,stock,Information Technology,US,2026-05-16T19:08:18.128168
+,Sherwin-Williams,SHW,stock,Materials,US,2026-05-16T19:08:18.128180
+,Simon Property Group,SPG,stock,Real Estate,US,2026-05-16T19:08:18.128193
+,Skyworks Solutions,SWKS,stock,Information Technology,US,2026-05-16T19:08:18.128206
+,J.M. Smucker Company (The),SJM,stock,Consumer Staples,US,2026-05-16T19:08:18.128219
+,Smurfit Westrock,SW,stock,Materials,US,2026-05-16T19:08:18.128232
+,Snap-on,SNA,stock,Industrials,US,2026-05-16T19:08:18.128244
+,Solventum,SOLV,stock,Health Care,US,2026-05-16T19:08:18.128257
+,Southern Company,SO,stock,Utilities,US,2026-05-16T19:08:18.128270
+,Southwest Airlines,LUV,stock,Industrials,US,2026-05-16T19:08:18.128283
+,Stanley Black & Decker,SWK,stock,Industrials,US,2026-05-16T19:08:18.128296
+,Starbucks,SBUX,stock,Consumer Discretionary,US,2026-05-16T19:08:18.128308
+,State Street Corporation,STT,stock,Financials,US,2026-05-16T19:08:18.128320
+,Steel Dynamics,STLD,stock,Materials,US,2026-05-16T19:08:18.128333
+,Steris,STE,stock,Health Care,US,2026-05-16T19:08:18.128345
+,Stryker Corporation,SYK,stock,Health Care,US,2026-05-16T19:08:18.128357
+,Supermicro,SMCI,stock,Information Technology,US,2026-05-16T19:08:18.128370
+,Synchrony Financial,SYF,stock,Financials,US,2026-05-16T19:08:18.128382
+,Synopsys,SNPS,stock,Information Technology,US,2026-05-16T19:08:18.128394
+,Sysco,SYY,stock,Consumer Staples,US,2026-05-16T19:08:18.128407
+,T-Mobile US,TMUS,stock,Communication Services,US,2026-05-16T19:08:18.128419
+,T. Rowe Price,TROW,stock,Financials,US,2026-05-16T19:08:18.128431
+,Take-Two Interactive,TTWO,stock,Communication Services,US,2026-05-16T19:08:18.128444
+,"Tapestry, Inc.",TPR,stock,Consumer Discretionary,US,2026-05-16T19:08:18.128456
+,Targa Resources,TRGP,stock,Energy,US,2026-05-16T19:08:18.128469
+,Target Corporation,TGT,stock,Consumer Staples,US,2026-05-16T19:08:18.128481
+,TE Connectivity,TEL,stock,Information Technology,US,2026-05-16T19:08:18.128493
+,Teledyne Technologies,TDY,stock,Information Technology,US,2026-05-16T19:08:18.128506
+,Teradyne,TER,stock,Information Technology,US,2026-05-16T19:08:18.128518
+,"Tesla, Inc.",TSLA,stock,Consumer Discretionary,US,2026-05-16T19:08:18.128530
+,Texas Instruments,TXN,stock,Information Technology,US,2026-05-16T19:08:18.128542
+,Texas Pacific Land Corporation,TPL,stock,Energy,US,2026-05-16T19:08:18.128555
+,Textron,TXT,stock,Industrials,US,2026-05-16T19:08:18.128567
+,Thermo Fisher Scientific,TMO,stock,Health Care,US,2026-05-16T19:08:18.128579
+,TJX Companies,TJX,stock,Consumer Discretionary,US,2026-05-16T19:08:18.128591
+,TKO Group Holdings,TKO,stock,Communication Services,US,2026-05-16T19:08:18.128604
+,Trade Desk (The),TTD,stock,Communication Services,US,2026-05-16T19:08:18.128616
+,Tractor Supply,TSCO,stock,Consumer Discretionary,US,2026-05-16T19:08:18.128628
+,Trane Technologies,TT,stock,Industrials,US,2026-05-16T19:08:18.128641
+,TransDigm Group,TDG,stock,Industrials,US,2026-05-16T19:08:18.128653
+,Travelers Companies (The),TRV,stock,Financials,US,2026-05-16T19:08:18.128666
+,Trimble Inc.,TRMB,stock,Information Technology,US,2026-05-16T19:08:18.128678
+,Truist Financial,TFC,stock,Financials,US,2026-05-16T19:08:18.128691
+,Tyler Technologies,TYL,stock,Information Technology,US,2026-05-16T19:08:18.128703
+,Tyson Foods,TSN,stock,Consumer Staples,US,2026-05-16T19:08:18.128715
+,U.S. Bancorp,USB,stock,Financials,US,2026-05-16T19:08:18.128728
+,Uber,UBER,stock,Industrials,US,2026-05-16T19:08:18.128740
+,"UDR, Inc.",UDR,stock,Real Estate,US,2026-05-16T19:08:18.128752
+,Ulta Beauty,ULTA,stock,Consumer Discretionary,US,2026-05-16T19:08:18.128765
+,Union Pacific Corporation,UNP,stock,Industrials,US,2026-05-16T19:08:18.128777
+,United Airlines Holdings,UAL,stock,Industrials,US,2026-05-16T19:08:18.128790
+,United Parcel Service,UPS,stock,Industrials,US,2026-05-16T19:08:18.128802
+,United Rentals,URI,stock,Industrials,US,2026-05-16T19:08:18.128814
+,UnitedHealth Group,UNH,stock,Health Care,US,2026-05-16T19:08:18.128829
+,Universal Health Services,UHS,stock,Health Care,US,2026-05-16T19:08:18.128842
+,Valero Energy,VLO,stock,Energy,US,2026-05-16T19:08:18.128854
+,Veeva Systems,VEEV,stock,Health Care,US,2026-05-16T19:08:18.128867
+,Ventas,VTR,stock,Real Estate,US,2026-05-16T19:08:18.128879
+,Veralto,VLTO,stock,Industrials,US,2026-05-16T19:08:18.128891
+,Verisign,VRSN,stock,Information Technology,US,2026-05-16T19:08:18.128904
+,Verisk Analytics,VRSK,stock,Industrials,US,2026-05-16T19:08:18.128916
+,Verizon,VZ,stock,Communication Services,US,2026-05-16T19:08:18.128928
+,Vertex Pharmaceuticals,VRTX,stock,Health Care,US,2026-05-16T19:08:18.128941
+,Vertiv,VRT,stock,Industrials,US,2026-05-16T19:08:18.128953
+,Viatris,VTRS,stock,Health Care,US,2026-05-16T19:08:18.128966
+,Vici Properties,VICI,stock,Real Estate,US,2026-05-16T19:08:18.128978
+,Visa Inc.,V,stock,Financials,US,2026-05-16T19:08:18.128990
+,Vistra Corp.,VST,stock,Utilities,US,2026-05-16T19:08:18.129005
+,Vulcan Materials Company,VMC,stock,Materials,US,2026-05-16T19:08:18.129018
+,W. R. Berkley Corporation,WRB,stock,Financials,US,2026-05-16T19:08:18.129030
+,W. W. Grainger,GWW,stock,Industrials,US,2026-05-16T19:08:18.129043
+,Wabtec,WAB,stock,Industrials,US,2026-05-16T19:08:18.129056
+,Walmart,WMT,stock,Consumer Staples,US,2026-05-16T19:08:18.129068
+,Walt Disney Company (The),DIS,stock,Communication Services,US,2026-05-16T19:08:18.129080
+,Warner Bros. Discovery,WBD,stock,Communication Services,US,2026-05-16T19:08:18.129093
+,Waste Management,WM,stock,Industrials,US,2026-05-16T19:08:18.129105
+,Waters Corporation,WAT,stock,Health Care,US,2026-05-16T19:08:18.129117
+,WEC Energy Group,WEC,stock,Utilities,US,2026-05-16T19:08:18.129130
+,Wells Fargo,WFC,stock,Financials,US,2026-05-16T19:08:18.129142
+,Welltower,WELL,stock,Real Estate,US,2026-05-16T19:08:18.129155
+,West Pharmaceutical Services,WST,stock,Health Care,US,2026-05-16T19:08:18.129167
+,Western Digital,WDC,stock,Information Technology,US,2026-05-16T19:08:18.129180
+,Weyerhaeuser,WY,stock,Real Estate,US,2026-05-16T19:08:18.129192
+,"Williams-Sonoma, Inc.",WSM,stock,Consumer Discretionary,US,2026-05-16T19:08:18.129204
+,Williams Companies,WMB,stock,Energy,US,2026-05-16T19:08:18.129216
+,Willis Towers Watson,WTW,stock,Financials,US,2026-05-16T19:08:18.129228
+,"Workday, Inc.",WDAY,stock,Information Technology,US,2026-05-16T19:08:18.129241
+,Wynn Resorts,WYNN,stock,Consumer Discretionary,US,2026-05-16T19:08:18.129253
+,Xcel Energy,XEL,stock,Utilities,US,2026-05-16T19:08:18.129266
+,Xylem Inc.,XYL,stock,Industrials,US,2026-05-16T19:08:18.129278
+,Yum! Brands,YUM,stock,Consumer Discretionary,US,2026-05-16T19:08:18.129290
+,Zebra Technologies,ZBRA,stock,Information Technology,US,2026-05-16T19:08:18.129302
+,Zimmer Biomet,ZBH,stock,Health Care,US,2026-05-16T19:08:18.129315
+,Zoetis,ZTS,stock,Health Care,US,2026-05-16T19:08:18.129327
+DE0007164600,SAP SE,SAP.DE,stock,Technology,DE,2026-05-16T19:08:18.129726
+NL0010273215,ASML Holding,ASML.AS,stock,Technology,NL,2026-05-16T19:08:18.129728
+FR0000131104,BNP Paribas,BNP.PA,stock,Financials,FR,2026-05-16T19:08:18.129729
+FR0000120321,L'Oreal,OR.PA,stock,Consumer Staples,FR,2026-05-16T19:08:18.129730
+DE0005140008,Deutsche Bank,DBK.DE,stock,Financials,DE,2026-05-16T19:08:18.129731
+DE0007100000,Mercedes-Benz,MBG.DE,stock,Consumer Discretionary,DE,2026-05-16T19:08:18.129731
+DE0005552004,Deutsche Telekom,DTE.DE,stock,Communication Services,DE,2026-05-16T19:08:18.129732
+FR0000121014,LVMH,MC.PA,stock,Consumer Discretionary,FR,2026-05-16T19:08:18.129733
+NL0000009165,Heineken,HEIA.AS,stock,Consumer Staples,NL,2026-05-16T19:08:18.129733
+GB0002374006,Diageo,DGE.L,stock,Consumer Staples,GB,2026-05-16T19:08:18.129734
+GB00B10RZP78,Unilever,ULVR.L,stock,Consumer Staples,GB,2026-05-16T19:08:18.129735
+GB0031348658,HSBC Holdings,HSBA.L,stock,Financials,GB,2026-05-16T19:08:18.129736
+GB0007188757,GSK,GSK.L,stock,Healthcare,GB,2026-05-16T19:08:18.129737
+CH0012221716,ABB Ltd,ABBN.SW,stock,Industrials,CH,2026-05-16T19:08:18.129737
+DE0005190003,BMW AG,BMW.DE,stock,Consumer Discretionary,DE,2026-05-16T19:08:18.129738
+DE0007037129,Rheinmetall,RHM.DE,stock,Industrials,DE,2026-05-16T19:08:18.129739
+SE0000115446,Ericsson,ERIC-B.ST,stock,Technology,SE,2026-05-16T19:08:18.129739
+FI0009000681,Nokia,NOKIA.HE,stock,Technology,FI,2026-05-16T19:08:18.129740
+ES0113211835,Banco Santander,SAN.MC,stock,Financials,ES,2026-05-16T19:08:18.129741
+IT0003128367,Enel,ENEL.MI,stock,Utilities,IT,2026-05-16T19:08:18.129741
+DE0006231004,Infineon Technologies,IFX.DE,stock,Technology,DE,2026-05-16T19:08:18.129742
+NL0009434992,Airbus SE,AIR.PA,stock,Industrials,FR,2026-05-16T19:08:18.129743
+GB00BH4HKS39,Ryanair,RYA.L,stock,Industrials,IE,2026-05-16T19:08:18.129743
+DE0008232125,Deutsche Lufthansa,LHA.DE,stock,Industrials,DE,2026-05-16T19:08:18.129744
+IE00B4L5Y983,iShares Core MSCI World,IWDA.AS,etf,Blend,Global,2026-05-16T19:08:18.129746
+IE00B3XXRP09,Vanguard S&P 500,VUSA.AS,etf,Blend,US,2026-05-16T19:08:18.129747
+IE00B52MJY50,iShares Core MSCI EM,IEMG,etf,Blend,EM,2026-05-16T19:08:18.129748
+IE00BKM4GZ66,iShares Core MSCI Europe,IEUA.AS,etf,Blend,EU,2026-05-16T19:08:18.129749
+IE00B5BMR087,iShares Core S&P 500,CSPX.L,etf,Blend,US,2026-05-16T19:08:18.129749
+IE00B3RBWM25,Vanguard FTSE All-World,VWRL.L,etf,Blend,Global,2026-05-16T19:08:18.129750
+IE00B4L5Y983,iShares MSCI Germany,EWG,etf,Blend,DE,2026-05-16T19:08:18.129751
+US4642874659,iShares MSCI South Korea,EWY,etf,Blend,KR,2026-05-16T19:08:18.129751
+US4642873859,iShares MSCI Japan,EWJ,etf,Blend,JP,2026-05-16T19:08:18.129752
+US4642872349,iShares MSCI China,MCHI,etf,Blend,CN,2026-05-16T19:08:18.129753
+US46434G1031,iShares MSCI Brazil,EWZ,etf,Blend,BR,2026-05-16T19:08:18.129754
+US78378X2036,S&P Global Clean Energy ETF,ICLN,etf,Energy,Global,2026-05-16T19:08:18.129754
+US46432F3428,iShares Global Defense & Aerospace,ITA,etf,Industrials,US,2026-05-16T19:08:18.129755
+US46090E5030,iShares Semiconductor ETF,SOXX,etf,Technology,US,2026-05-16T19:08:18.129755
+US46137V4085,iShares Robotics and AI ETF,IRBO,etf,Technology,Global,2026-05-16T19:08:18.129756
+US33740Q1085,First Trust NASDAQ Cybersecurity,CIBR,etf,Technology,US,2026-05-16T19:08:18.129757
+US00214Q1040,ARK Innovation ETF,ARKK,etf,Technology,US,2026-05-16T19:08:18.129757
+US78462F1030,SPDR Gold Shares,GLD,etf,Commodities,Global,2026-05-16T19:08:18.129758
+US9229087690,Vanguard FTSE Europe ETF,VGK,etf,Blend,EU,2026-05-16T19:08:18.129759
+US46434G8473,iShares MSCI India ETF,INDA,etf,Blend,IN,2026-05-16T19:08:18.129759
+US46432F8491,iShares Global Clean Energy ETF,INRG.L,etf,Energy,Global,2026-05-16T19:08:18.129760
