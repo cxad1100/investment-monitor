@@ -5,8 +5,22 @@ Assets scoring >=70 or grade-changed get Claude deep analysis (Pass 2).
 """
 
 
-def compute_earnings_score(earnings_data: dict) -> float:
-    """Earnings catalyst score: beat_probability → 0-100."""
+def compute_earnings_score(earnings_data: dict, fund_data: dict | None = None) -> float:
+    """Earnings catalyst score 0-100.
+
+    Uses analyst consensus (recommendationMean + upside) when available.
+    Falls back to beat_probability (default 0.5).
+    """
+    if fund_data:
+        analyst_score_raw = fund_data.get("analyst_score")  # 1=strong buy, 5=strong sell
+        upside = fund_data.get("upside_pct") or 0.0
+        if analyst_score_raw is not None:
+            # Convert 1-5 → 100-0
+            analyst_signal = (5.0 - float(analyst_score_raw)) / 4.0 * 100.0
+            # Upside: clamp +/-50% → 0-100
+            upside_signal = max(0.0, min(100.0, 50.0 + float(upside)))
+            return round(0.6 * analyst_signal + 0.4 * upside_signal, 1)
+
     prob = earnings_data.get("beat_probability", 0.5)
     return round(float(prob) * 100, 1)
 
@@ -149,7 +163,7 @@ def score_all_assets(signals: dict) -> dict[str, dict]:
         s_data = short_interest.get(ticker, {})
         w_data = wsb.get(ticker, {})
 
-        s_earnings = compute_earnings_score(e_data)
+        s_earnings = compute_earnings_score(e_data, f_data)
         s_insider = compute_insider_score(i_data)
         s_macro = compute_macro_score(sector, macro)
         s_geo = compute_geo_score(ticker, asset_meta, events)

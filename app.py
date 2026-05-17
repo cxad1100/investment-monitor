@@ -262,6 +262,43 @@ def build_deep_dive(ticker: str, signals: dict) -> dict:
         fcf_b = fcf / 1e9
         pros.append(f"Positive free cash flow — ${fcf_b:.1f}B")
 
+    # ── Analyst consensus ────────────────────────────────────────────────────
+    analyst_score = fund.get("analyst_score")  # 1=strong buy, 5=strong sell
+    analyst_rating = fund.get("analyst_rating", "")
+    target_price = fund.get("target_price")
+    n_analysts = fund.get("n_analysts", 0)
+    upside = fund.get("upside_pct")
+    next_earnings = fund.get("next_earnings")
+    current_price = fund.get("current_price")
+
+    if analyst_score is not None and n_analysts >= 3:
+        if analyst_score <= 1.8:
+            pros.append(f"Strong analyst consensus: {n_analysts} analysts rate '{analyst_rating}' (score {analyst_score:.1f}/5)")
+        elif analyst_score <= 2.5:
+            pros.append(f"Analyst consensus buy: {n_analysts} analysts rate '{analyst_rating}'")
+        elif analyst_score >= 3.5:
+            cons.append(f"Weak analyst consensus: {n_analysts} analysts rate '{analyst_rating}' (score {analyst_score:.1f}/5)")
+
+    if upside is not None:
+        if upside >= 20:
+            pros.append(f"Significant upside to analyst consensus target: +{upside:.1f}% (target ${target_price} vs current ${current_price})")
+        elif upside >= 10:
+            pros.append(f"Upside to analyst target: +{upside:.1f}% (${target_price})")
+        elif upside < -5:
+            cons.append(f"Trading above analyst consensus target: {upside:.1f}% downside (target ${target_price})")
+
+    if next_earnings:
+        from datetime import date
+        try:
+            ed = date.fromisoformat(next_earnings)
+            days_to = (ed - date.today()).days
+            if 0 < days_to <= 30:
+                cons.append(f"Earnings in {days_to} days ({next_earnings}) — binary event risk")
+            elif 0 < days_to <= 60:
+                pros.append(f"Earnings catalyst approaching: {next_earnings} ({days_to} days)")
+        except Exception:
+            pass
+
     # ── Insider flow ─────────────────────────────────────────────────────────
     buy_f = insider.get("buy_filings", 0)
     sell_f = insider.get("sell_filings", 0)
@@ -615,13 +652,17 @@ with tab_deep:
                 sht = dive["short"]
                 if any([fund, ins, opt, sht]):
                     st.markdown("**Key Metrics**")
-                    m1, m2, m3, m4, m5, m6 = st.columns(6)
-                    m1.metric("P/E", f"{fund.get('pe_ratio', 'N/A'):.1f}x" if fund.get("pe_ratio") else "N/A")
-                    m2.metric("Rev Growth", f"{fund.get('revenue_growth_yoy', 0):+.1f}%" if fund.get("revenue_growth_yoy") is not None else "N/A")
-                    m3.metric("ROE", f"{fund.get('return_on_equity', 0):.1f}%" if fund.get("return_on_equity") else "N/A")
-                    m4.metric("Put-Call", f"{opt.get('put_call_ratio', 'N/A'):.2f}" if opt.get("put_call_ratio") else "N/A")
-                    m5.metric("Short Float", f"{sht.get('short_float_pct', 'N/A'):.1f}%" if sht.get("short_float_pct") is not None else "N/A")
-                    m6.metric("Insider", ins.get("signal", "N/A").replace("_", " ").title())
+                    m1, m2, m3, m4, m5, m6, m7, m8 = st.columns(8)
+                    m1.metric("P/E", f"{fund.get('pe_ratio'):.1f}x" if fund.get("pe_ratio") else "N/A")
+                    m2.metric("Rev Growth", f"{fund.get('revenue_growth_yoy'):+.1f}%" if fund.get("revenue_growth_yoy") is not None else "N/A")
+                    m3.metric("ROE", f"{fund.get('return_on_equity'):.1f}%" if fund.get("return_on_equity") else "N/A")
+                    m4.metric("Analyst", fund.get("analyst_rating", "N/A").title())
+                    upside_val = fund.get("upside_pct")
+                    m5.metric("Upside to Target", f"{upside_val:+.1f}%" if upside_val is not None else "N/A",
+                              delta=f"${fund.get('target_price','?')}" if upside_val is not None else None)
+                    m6.metric("Put-Call", f"{opt.get('put_call_ratio'):.2f}" if opt.get("put_call_ratio") else "N/A")
+                    m7.metric("Short Float", f"{sht.get('short_float_pct'):.1f}%" if sht.get("short_float_pct") is not None else "N/A")
+                    m8.metric("Next Earnings", fund.get("next_earnings", "N/A"))
 
                 # Grouped event analysis
                 rel_groups = dive["relevant_groups"]
@@ -659,13 +700,59 @@ with tab_deep:
 with tab_signals:
     macro = signals.get("macro", {})
     btc = signals.get("btc", {})
+    sentiment = signals.get("sentiment", {})
+    vix_data = sentiment.get("vix", {})
+    fg_data = sentiment.get("fear_greed", {})
+    spreads = sentiment.get("credit_spreads", {})
 
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4, c5 = st.columns(5)
     regime = macro.get("regime", "unknown").upper()
     risk = macro.get("risk_level", "?").upper()
     c1.metric("Market Regime", regime)
     c2.metric("Risk Level", risk)
     c3.metric("BTC Regime", btc.get("regime", "?").replace("_", " ").title())
+    vix_val = vix_data.get("vix")
+    vix_1m = vix_data.get("vix_1m_ago")
+    c4.metric("VIX", f"{vix_val:.1f}" if vix_val else "N/A",
+              delta=f"{vix_val - vix_1m:+.1f} vs 1M" if vix_val and vix_1m else None,
+              delta_color="inverse")
+    fg_score = fg_data.get("score")
+    fg_prev = fg_data.get("previous_close")
+    c5.metric(f"Fear/Greed", f"{fg_score:.0f} — {fg_data.get('rating','?').replace('_',' ').title()}" if fg_score else "N/A",
+              delta=f"{fg_score - fg_prev:+.1f}" if fg_score and fg_prev else None)
+
+    if vix_data or fg_data or spreads:
+        with st.expander("📊 Market Sentiment Detail", expanded=False):
+            s1, s2, s3 = st.columns(3)
+            with s1:
+                st.markdown("**VIX (Volatility)**")
+                st.markdown(f"Current: **{vix_data.get('vix', 'N/A')}** ({vix_data.get('regime', '?').replace('_',' ')})")
+                st.markdown(f"1W ago: {vix_data.get('vix_1w_ago', '?')} · 1M ago: {vix_data.get('vix_1m_ago', '?')}")
+                st.markdown(f"1Y range: {vix_data.get('vix_1y_low', '?')} – {vix_data.get('vix_1y_high', '?')}")
+                st.markdown(f"Trend: *{vix_data.get('trend', '?')}*")
+            with s2:
+                st.markdown("**CNN Fear & Greed**")
+                score = fg_data.get("score", 50)
+                bar_fill = int(score / 5)
+                bar = "█" * bar_fill + "░" * (20 - bar_fill)
+                st.markdown(f"`{bar}` **{score:.0f}/100**")
+                st.markdown(f"Rating: **{fg_data.get('rating','?').replace('_',' ').title()}**")
+                st.markdown(f"1W ago: {fg_data.get('previous_1_week', '?')} · 1M ago: {fg_data.get('previous_1_month', '?')}")
+            with s3:
+                st.markdown("**Credit Spreads (HYG/LQD)**")
+                spread_r = spreads.get("spread_regime", "?")
+                spread_c = spreads.get("spread_change_1m")
+                color = "🔴" if spread_r == "widening" else ("🟢" if spread_r == "tightening" else "🟡")
+                st.markdown(f"{color} Spreads: **{spread_r}** ({spread_c:+.2f}% 1M)" if spread_c is not None else f"Regime: {spread_r}")
+                hyg = spreads.get("hyg", {})
+                lqd = spreads.get("lqd", {})
+                tlt = spreads.get("tlt", {})
+                if hyg:
+                    st.markdown(f"HYG: {hyg.get('price', '?')} ({hyg.get('return_1m_pct', 0):+.1f}% 1M)")
+                if lqd:
+                    st.markdown(f"LQD: {lqd.get('price', '?')} ({lqd.get('return_1m_pct', 0):+.1f}% 1M)")
+                if tlt:
+                    st.markdown(f"TLT: {tlt.get('price', '?')} ({tlt.get('return_1m_pct', 0):+.1f}% 1M)")
 
     st.divider()
     col_a, col_b = st.columns(2)

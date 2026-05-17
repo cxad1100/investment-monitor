@@ -70,6 +70,29 @@ def fetch_fundamentals(tickers: list[str]) -> dict:
                 free_cashflow = info.get("freeCashflow")
                 total_revenue = info.get("totalRevenue")
 
+                # Analyst consensus
+                rec_mean = info.get("recommendationMean")
+                rec_key = info.get("recommendationKey", "hold")
+                target_mean = info.get("targetMeanPrice")
+                target_high = info.get("targetHighPrice")
+                target_low = info.get("targetLowPrice")
+                n_analysts = info.get("numberOfAnalystOpinions", 0)
+                forward_eps = info.get("forwardEps")
+                current_price = info.get("currentPrice") or info.get("regularMarketPrice")
+
+                upside_pct = None
+                if target_mean and current_price and current_price > 0:
+                    upside_pct = round((target_mean - current_price) / current_price * 100, 1)
+
+                # Next earnings date from Unix timestamp
+                earnings_ts = info.get("earningsTimestamp")
+                next_earnings = None
+                if earnings_ts:
+                    try:
+                        next_earnings = datetime.fromtimestamp(int(earnings_ts)).strftime("%Y-%m-%d")
+                    except Exception:
+                        pass
+
                 result[ticker] = {
                     "pe_ratio": round(pe, 2) if pe else None,
                     "eps": round(eps, 4) if eps else None,
@@ -86,6 +109,17 @@ def fetch_fundamentals(tickers: list[str]) -> dict:
                     "country": info.get("country", "Unknown"),
                     "currency": info.get("currency", "USD"),
                     "name": info.get("longName") or info.get("shortName", ticker),
+                    # Analyst data
+                    "analyst_score": round(rec_mean, 3) if rec_mean else None,
+                    "analyst_rating": rec_key,
+                    "target_price": round(target_mean, 2) if target_mean else None,
+                    "target_high": round(target_high, 2) if target_high else None,
+                    "target_low": round(target_low, 2) if target_low else None,
+                    "n_analysts": n_analysts,
+                    "upside_pct": upside_pct,
+                    "forward_eps": round(forward_eps, 4) if forward_eps else None,
+                    "next_earnings": next_earnings,
+                    "current_price": round(current_price, 2) if current_price else None,
                 }
             except Exception as e:
                 result[ticker] = {"error": str(e)}

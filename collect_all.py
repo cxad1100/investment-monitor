@@ -1,6 +1,6 @@
 """
 Master data collection script.
-Runs all 9 collectors in sequence and produces data/signals.json.
+Runs all 10 collectors in sequence and produces data/signals.json.
 No Claude API required. Runtime: ~10-20 minutes for full universe.
 
 Usage:
@@ -28,6 +28,7 @@ from tools.options_tools import fetch_options_signal
 from tools.short_interest_tools import fetch_short_interest
 from tools.wsb_tools import fetch_wsb_posts, analyze_wsb_signals
 from tools.btc_tools import fetch_btc_signal
+from tools.sentiment_tools import fetch_market_sentiment
 from fast_scorer import score_all_assets
 
 
@@ -121,6 +122,9 @@ def collect(fast: bool = False) -> dict:
     wsb_signal = analyze_wsb_signals(wsb_posts)
     btc_signal = fetch_btc_signal()
 
+    print("[10/10] Market sentiment (VIX, Fear/Greed, credit spreads)...")
+    sentiment = fetch_market_sentiment()
+
     universe_map = build_universe_map(universe)
 
     signals = {
@@ -140,11 +144,17 @@ def collect(fast: bool = False) -> dict:
         "short_interest": short_data,
         "wsb": wsb_signal,
         "btc": btc_signal,
+        "sentiment": sentiment,
         "universe_map": {k: {"sector": v.get("sector", ""), "region": v.get("region", ""),
                              "type": v.get("type", "stock"), "name": v.get("name", "")}
                          for k, v in universe_map.items()},
         "events": [],
     }
+
+    vix_val = sentiment.get("vix", {}).get("vix", "?")
+    fg_score = sentiment.get("fear_greed", {}).get("score", "?")
+    fg_rating = sentiment.get("fear_greed", {}).get("rating", "?")
+    print(f"      VIX {vix_val} · Fear/Greed {fg_score} ({fg_rating}) · credit spreads {sentiment.get('credit_spreads', {}).get('spread_regime', '?')}")
 
     print("\n[fast-scorer] Computing composite scores...")
     fast_scores = score_all_assets(signals)
