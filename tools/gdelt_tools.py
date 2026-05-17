@@ -1,68 +1,110 @@
-"""GDELT API v2 — country conflict indices and recent event volumes."""
+"""GDELT Doc API v2 — regional conflict intensity from article volume and tone."""
 
+import time
 import requests
-from datetime import datetime, timedelta
 
-GDELT_TIMELINE = "https://api.gdeltproject.org/api/v2/timeline/timeline"
+GDELT_DOC = "https://api.gdeltproject.org/api/v2/doc/doc"
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; investment-research/1.0)"}
 
 MONITORED_REGIONS = [
-    {"name": "Middle East", "query": "(Iran OR Israel OR Gaza OR Lebanon OR Syria OR Yemen) (war OR conflict OR attack OR military OR strike)"},
-    {"name": "Eastern Europe", "query": "(Ukraine OR Russia OR NATO OR Donbas) (war OR attack OR offensive OR ceasefire OR troops)"},
-    {"name": "Asia Pacific", "query": "(Taiwan OR China OR North Korea) (military OR strait OR invasion OR missile OR tension)"},
-    {"name": "Sub-Saharan Africa", "query": "(Sudan OR Congo OR Mali OR Sahel) (coup OR conflict OR military OR civil war)"},
+    {
+        "name": "Middle East",
+        "query": "(Iran OR Israel OR Gaza OR Lebanon OR Syria OR Yemen) (war OR conflict OR attack OR military OR strike)",
+    },
+    {
+        "name": "Eastern Europe",
+        "query": "(Ukraine OR Russia OR NATO OR Donbas) (war OR attack OR offensive OR ceasefire OR troops)",
+    },
+    {
+        "name": "Asia Pacific",
+        "query": "(Taiwan OR China OR North Korea) (military OR strait OR invasion OR missile OR tension)",
+    },
+    {
+        "name": "Sub-Saharan Africa",
+        "query": "(Sudan OR Congo OR Mali OR Sahel) (coup OR conflict OR military)",
+    },
 ]
 
+# Baseline: ~50 articles/region/week = conflict_score ~0.5
+_ARTICLE_SCALE = 100.0
 
-def _fetch_gdelt_volume(query: str, days: int = 14) -> list[float]:
-    start = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d%H%M%S")
-    end = datetime.now().strftime("%Y%m%d%H%M%S")
-    params = {
-        "query": query,
-        "mode": "timelinevol",
-        "format": "json",
-        "STARTDATETIME": start,
-        "ENDDATETIME": end,
-        "SMOOTHING": "3",
-    }
+
+def _fetch_articles(query: str, max_records: int = 100) -> list[dict]:
     try:
-        resp = requests.get(GDELT_TIMELINE, params=params, headers=HEADERS, timeout=30)
+        resp = requests.get(
+            GDELT_DOC,
+            params={"query": query, "mode": "artlist", "format": "json",
+                    "maxrecords": str(max_records)},
+            headers=HEADERS,
+            timeout=20,
+        )
+        if resp.status_code == 429:
+            time.sleep(15)
+            resp = requests.get(
+                GDELT_DOC,
+                params={"query": query, "mode": "artlist", "format": "json",
+                        "maxrecords": str(max_records)},
+                headers=HEADERS,
+                timeout=20,
+            )
+        resp.raise_for_status()
         data = resp.json()
-        timeline = data.get("timeline", [{}])[0].get("data", [])
-        return [float(p.get("value", 0)) for p in timeline]
+        return data.get("articles", [])
     except Exception:
         return []
 
 
 def fetch_regional_conflict_indices() -> list[dict]:
-    """Fetch conflict event volume for each monitored region."""
+    """Return conflict intensity for each monitored region.
+
+    conflict_score: 0.0 (quiet) to 1.0 (intense). Derived from article count
+    and average tone (negative tone = more conflict). Returns 0.3 on API failure.
+    """
     results = []
-    for region in MONITORED_REGIONS:
-        volumes = _fetch_gdelt_volume(region["query"])
-        if not volumes or len(volumes) < 4:
+    for i, region in enumerate(MONITORED_REGIONS):
+        if i > 0:
+            time.sleep(6)  # GDELT limit: 1 req/5s
+
+        articles = _fetch_articles(region["query"])
+        if not articles:
             results.append({
                 "region": region["name"],
-                "conflict_score": 0.4,
+                "conflict_score": 0.3,
                 "trend": "unknown",
+                "article_count": 0,
                 "source": "gdelt",
             })
             continue
-        recent = volumes[-7:] if len(volumes) >= 7 else volumes
-        prev = volumes[-14:-7] if len(volumes) >= 14 else volumes[:len(volumes)//2]
-        recent_avg = sum(recent) / len(recent)
-        prev_avg = sum(prev) / len(prev) if prev else recent_avg
-        conflict_score = min(1.0, recent_avg / 100.0)
-        if recent_avg > prev_avg * 1.25:
+
+        count = len(articles)
+        tones = []
+        for a in articles:
+            t = a.get("tone", "")
+            try:
+                tones.append(float(t))
+            except (ValueError, TypeError):
+                pass
+
+        avg_tone = sum(tones) / len(tones) if tones else 0.0
+        # tone < 0 → negative/conflict; normalize to 0-1
+        tone_score = max(0.0, min(1.0, (-avg_tone + 5) / 20.0))
+        count_score = min(1.0, count / _ARTICLE_SCALE)
+        conflict_score = round(0.6 * count_score + 0.4 * tone_score, 3)
+
+        if avg_tone < -3:
             trend = "escalating"
-        elif recent_avg < prev_avg * 0.75:
+        elif avg_tone > 3:
             trend = "de-escalating"
         else:
             trend = "stable"
+
         results.append({
             "region": region["name"],
-            "conflict_score": round(conflict_score, 3),
+            "conflict_score": conflict_score,
             "trend": trend,
-            "recent_avg_volume": round(recent_avg, 2),
+            "article_count": count,
+            "avg_tone": round(avg_tone, 2),
             "source": "gdelt",
         })
+
     return results
