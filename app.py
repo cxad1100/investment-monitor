@@ -677,7 +677,7 @@ with st.container():
 
     st.divider()
 
-    col_ev, col_news = st.columns([3, 1])
+    col_ev, col_right = st.columns([3, 1])
 
     with col_ev:
         st.markdown("#### Key Events and Market Interactions")
@@ -687,7 +687,22 @@ with st.container():
                 st.markdown(chain)
             st.markdown("---")
 
-    with col_news:
+    with col_right:
+        # ── Retail Trend (WSB) ─────────────────────────────────────────────
+        retail = signals.get("retail_trend", {})
+        if retail:
+            direction = retail.get("trend_direction", "mixed")
+            dir_label = {"risk_on": "RISK ON", "defensive": "DEFENSIVE", "mixed": "MIXED"}.get(direction, direction.upper())
+            st.markdown(f"#### Retail Trend — {dir_label}")
+            st.caption(retail.get("narrative", ""))
+            for sm in retail.get("sector_momentum", [])[:5]:
+                bar = "█" * int(sm["score"] * 8) + "░" * (8 - int(sm["score"] * 8))
+                st.markdown(f"`{bar}` {sm['wsb_label']} ({sm['momentum']})")
+            sq = retail.get("squeeze_plays", [])
+            if sq:
+                st.markdown(f"Squeeze watch: {', '.join(s['ticker'] for s in sq[:3])}")
+
+        st.markdown("")
         st.markdown("#### News Themes")
         for theme, count in world["news_themes"]:
             bar = "█" * min(count, 8) + "░" * (8 - min(count, 8))
@@ -695,9 +710,9 @@ with st.container():
 
         st.markdown("")
         st.markdown("#### Sector Outlook")
-        for s in world["tailwinds"][:4]:
+        for s in world["tailwinds"][:3]:
             st.markdown(f"+ {s}")
-        for s in world["headwinds"][:4]:
+        for s in world["headwinds"][:3]:
             st.markdown(f"- {s}")
 
     st.divider()
@@ -1046,24 +1061,53 @@ with tab_events:
         st.info("No Polymarket data.")
     else:
         st.caption(f"{_total_pm} markets across geo · macro · company categories")
+        # Build a lookup: market_id → supporting headlines
+        news_map = signals.get("news_market_bridge", {}).get("market_news_map", {})
+
         all_groups = group_polymarket_events(signals)
         for grp in all_groups:
             prob = grp["dominant_prob"]
             alert = "HIGH" if prob > 0.4 else ("MED" if prob > 0.15 else "LOW")
+
+            # Collect supporting news across all markets in this group
+            group_news = []
+            seen_titles = set()
+            for ev in grp["markets"]:
+                for n in news_map.get(ev["id"], []):
+                    if n["title"] not in seen_titles:
+                        group_news.append(n)
+                        seen_titles.add(n["title"])
+            group_news = sorted(group_news, key=lambda x: -x["match_score"])[:4]
+
+            news_badge = f"  |  {len(group_news)} news" if group_news else ""
             with st.expander(
-                f"[{alert}] {grp['name']} — {grp['signal_text']}",
+                f"[{alert}] {grp['name']} — {grp['signal_text']}{news_badge}",
                 expanded=prob > 0.2,
             ):
                 default_impact = grp["impact"].get("default", "")
                 if default_impact:
                     st.markdown(f"**Market Impact:** {default_impact}")
+
+                # Supporting news
+                if group_news:
+                    st.markdown("**Supporting News**")
+                    for n in group_news:
+                        topics_str = ", ".join(n["shared_topics"])
+                        st.markdown(
+                            f"- [{n['source']}] **{n['title']}**  "
+                            f"<span style='color:#888;font-size:0.75em'>topics: {topics_str}</span>",
+                            unsafe_allow_html=True,
+                        )
+
                 st.divider()
                 for ev in grp["markets"]:
                     p = ev["probability"]
                     bar_fill = int(p * 18)
                     bar = "█" * bar_fill + "░" * (18 - bar_fill)
+                    ev_news = news_map.get(ev["id"], [])
+                    news_indicator = f"  [{len(ev_news)} news]" if ev_news else ""
                     st.markdown(
-                        f"`{bar}` **{p:.0%}** {ev['question']}  "
+                        f"`{bar}` **{p:.0%}** {ev['question']}{news_indicator}  "
                         f"<span style='color:#888;font-size:0.78em'>"
                         f"vol ${ev['volume']/1e6:.1f}M · ends {ev.get('end_date','?')[:10]}"
                         f"</span>",
