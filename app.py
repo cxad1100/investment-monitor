@@ -807,7 +807,7 @@ def _render_deep_dive(ticker: str, score: int, grade: str, sector: str, asset_ty
 
 
 # ═══════════════════════════════════════════════════════
-# TAB 1 — RATINGS (with inline expandable detail)
+# TAB 1 — RATINGS
 # ═══════════════════════════════════════════════════════
 with tab_ratings:
     fast_scores = signals.get("fast_scores", {})
@@ -824,14 +824,13 @@ with tab_ratings:
 
         st.divider()
 
-        fc1, fc2, fc3, fc4 = st.columns(4)
+        fc1, fc2, fc3 = st.columns(3)
         sectors = ["All"] + sorted(df["Sector"].dropna().unique().tolist())
         types   = ["All"] + sorted(df["Type"].dropna().unique().tolist())
         regions = ["All"] + sorted(df["Region"].dropna().unique().tolist())
         sel_sector = fc1.selectbox("Sector", sectors)
         sel_type   = fc2.selectbox("Type", types)
         sel_region = fc3.selectbox("Region", regions)
-        min_score  = fc4.slider("Min Score", 0, 100, 0, 5)
 
         filtered = df.copy()
         if sel_sector != "All":
@@ -840,40 +839,56 @@ with tab_ratings:
             filtered = filtered[filtered["Type"] == sel_type]
         if sel_region != "All":
             filtered = filtered[filtered["Region"] == sel_region]
-        filtered = filtered[filtered["Score"] >= min_score]
 
-        with st.expander("Sector Score Chart", expanded=False):
-            sector_avg = df.groupby("Sector")["Score"].mean().sort_values(ascending=False).reset_index()
-            fig = px.bar(sector_avg, x="Sector", y="Score", color="Score",
-                         color_continuous_scale="RdYlGn", range_color=[40, 70])
-            fig.update_layout(height=320, margin=dict(t=10, b=40),
-                              plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
-            st.plotly_chart(fig, width="stretch")
+        # Add company name column for display
+        fundamentals = signals.get("fundamentals", {})
+        filtered = filtered.copy()
+        filtered["Company"] = filtered["Ticker"].map(
+            lambda t: fundamentals.get(t, {}).get("name", "") or ""
+        )
 
-        st.markdown(f"**{len(filtered)} assets** — click any row to expand analysis")
-        st.caption("Sub-scores: Earnings 25% · Insider 20% · Macro 15% · Geo 15% · Fundamentals 15% · Options 5% · WSB/Short 5%")
+        display_df = filtered[["Ticker", "Company", "Grade", "Score", "Sector", "Type", "Region"]].copy()
+        display_df.index = range(1, len(display_df) + 1)
+        st.dataframe(
+            display_df,
+            width="stretch",
+            column_config={
+                "Score": st.column_config.ProgressColumn("Score", min_value=0, max_value=100, format="%d"),
+            },
+            height=480,
+        )
+
         st.divider()
 
-        visible = filtered.head(150)
-        for _, row in visible.iterrows():
-            ticker     = row["Ticker"]
-            score      = int(row["Score"])
-            grade      = row["Grade"]
-            sector     = row["Sector"]
-            asset_type = row["Type"]
-            company_name = signals.get("fundamentals", {}).get(ticker, {}).get("name", "")
-            badge_color = GRADE_COLOR.get(grade, "#888")
+        # ── Sector chart ────────────────────────────────────────────────────────
+        sector_avg = df.groupby("Sector")["Score"].mean().sort_values(ascending=False).reset_index()
+        fig = px.bar(sector_avg, x="Sector", y="Score", color="Score",
+                     color_continuous_scale="RdYlGn", range_color=[40, 70])
+        fig.update_layout(height=300, margin=dict(t=10, b=40),
+                          plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
+        st.plotly_chart(fig, width="stretch", key="sector_chart")
 
-            label = (
-                f"{ticker}"
-                + (f"  {company_name}" if company_name and company_name != ticker else "")
-                + f"    {grade}    Score {score}    {sector}"
-            )
-            with st.expander(label, expanded=False):
-                _render_deep_dive(ticker, score, grade, sector, asset_type, signals)
+        st.divider()
 
-        if len(filtered) > 150:
-            st.caption(f"Showing 150 of {len(filtered)}. Use filters or raise Min Score to narrow.")
+        # ── Ticker detail ────────────────────────────────────────────────────────
+        st.markdown("#### Stock Analysis")
+        all_tickers = filtered["Ticker"].tolist()
+        default_idx = 0
+        sel_ticker = st.selectbox(
+            "Select ticker",
+            options=all_tickers,
+            index=default_idx,
+            format_func=lambda t: f"{t}  —  {fundamentals.get(t, {}).get('name', '')}",
+        )
+
+        if sel_ticker:
+            entry = fast_scores.get(sel_ticker, {})
+            score = entry.get("score", 0)
+            grade = entry.get("grade", "?")
+            sector = entry.get("sector", "")
+            asset_type = entry.get("type", "stock")
+            st.divider()
+            _render_deep_dive(sel_ticker, score, grade, sector, asset_type, signals)
 
 # TAB 3 — MACRO SIGNALS
 # ═══════════════════════════════════════════════════════
