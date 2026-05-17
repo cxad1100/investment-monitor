@@ -7,6 +7,189 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+# ── Sector → Polymarket keyword mapping ─────────────────────────────────────
+SECTOR_EVENT_KEYWORDS = {
+    "Energy": ["iran", "oil", "opec", "russia", "ukraine"],
+    "Information Technology": ["china", "taiwan", "bitcoin", "semiconductor"],
+    "Financials": ["fed rate", "rate cut", "recession", "rate hike", "interest rate"],
+    "Materials": ["china", "copper", "russia", "tariff"],
+    "Industrials": ["tariff", "trade war", "china"],
+    "Consumer Discretionary": ["recession", "tariff"],
+    "Consumer Staples": ["recession"],
+    "Utilities": ["fed rate", "rate cut", "recession", "interest rate"],
+    "Healthcare": ["recession"],
+    "Real Estate": ["fed rate", "recession", "interest rate"],
+    "Communication Services": ["china"],
+}
+
+
+def _fmt_pct(v, suffix="%") -> str:
+    if v is None:
+        return "N/A"
+    return f"{v:+.1f}{suffix}" if v != 0 else f"0{suffix}"
+
+
+def build_deep_dive(ticker: str, signals: dict) -> dict:
+    """Synthesize all signals for one ticker into buy/hold rationale."""
+    score_entry = signals["fast_scores"].get(ticker, {})
+    score = score_entry.get("score", 50)
+    sector = score_entry.get("sector", "")
+    sub = score_entry.get("sub_scores", {})
+
+    fund = signals.get("fundamentals", {}).get(ticker, {})
+    insider = signals.get("insider", {}).get(ticker, {})
+    options = signals.get("options", {}).get(ticker, {})
+    short = signals.get("short_interest", {}).get(ticker, {})
+    macro = signals.get("macro", {})
+    btc = signals.get("btc", {})
+    poly = signals.get("polymarket_geo", [])
+
+    pros, cons = [], []
+
+    # ── Fundamentals ────────────────────────────────────────────────────────
+    pe = fund.get("pe_ratio")
+    roe = fund.get("return_on_equity")
+    rev_g = fund.get("revenue_growth_yoy")
+    earn_g = fund.get("earnings_growth_yoy")
+    de = fund.get("debt_to_equity")
+    fcf = fund.get("free_cashflow_usd")
+
+    if pe and pe < 15:
+        pros.append(f"Cheap valuation — P/E {pe:.1f}x (below 15x threshold)")
+    elif pe and pe > 40:
+        cons.append(f"Rich valuation — P/E {pe:.1f}x demands continued growth execution")
+
+    if roe and roe > 25:
+        pros.append(f"High capital efficiency — ROE {roe:.1f}%")
+    elif roe and roe < 8:
+        cons.append(f"Low return on equity — ROE {roe:.1f}%")
+
+    if rev_g is not None:
+        if rev_g > 25:
+            pros.append(f"Strong revenue growth — {rev_g:.1f}% YoY")
+        elif rev_g > 10:
+            pros.append(f"Solid revenue growth — {rev_g:.1f}% YoY")
+        elif rev_g < 0:
+            cons.append(f"Revenue declining — {rev_g:.1f}% YoY")
+
+    if earn_g is not None and earn_g > 50:
+        pros.append(f"Exceptional earnings growth — {earn_g:.1f}% YoY")
+    elif earn_g is not None and earn_g < -20:
+        cons.append(f"Earnings contracting — {earn_g:.1f}% YoY")
+
+    if de is not None:
+        if de < 30:
+            pros.append(f"Conservative balance sheet — D/E {de:.0f}%")
+        elif de > 250:
+            cons.append(f"Highly leveraged — D/E {de:.0f}% (rate-sensitive)")
+
+    if fcf and fcf > 0:
+        fcf_b = fcf / 1e9
+        pros.append(f"Positive free cash flow — ${fcf_b:.1f}B")
+
+    # ── Insider flow ─────────────────────────────────────────────────────────
+    buy_f = insider.get("buy_filings", 0)
+    sell_f = insider.get("sell_filings", 0)
+    ins_sig = insider.get("signal", "neutral")
+    if ins_sig == "strong_buy" and buy_f > 0:
+        pros.append(f"Insider buying — {buy_f} buy filing(s) vs {sell_f} sells in 90 days")
+    elif sell_f > 3 and buy_f == 0:
+        cons.append(f"Insider selling — {sell_f} sell filing(s), no buys in 90 days")
+    elif ins_sig == "neutral":
+        cons.append("No insider buy activity in last 90 days")
+
+    # ── Options flow ─────────────────────────────────────────────────────────
+    pcr = options.get("put_call_ratio")
+    opt_sig = options.get("signal", "")
+    if pcr is not None:
+        if pcr < 0.4:
+            pros.append(f"Heavily call-skewed options (PCR {pcr:.2f}) — market positioning strongly bullish")
+        elif pcr < 0.7:
+            pros.append(f"Bullish options positioning (PCR {pcr:.2f})")
+        elif pcr > 1.5:
+            cons.append(f"Put-heavy options flow (PCR {pcr:.2f}) — market hedging downside")
+        elif pcr > 1.0:
+            cons.append(f"Elevated put-call ratio (PCR {pcr:.2f}) — cautious market sentiment")
+
+    # ── Short interest ───────────────────────────────────────────────────────
+    sf = short.get("short_float_pct")
+    short_sig = short.get("signal", "")
+    if sf is not None:
+        if sf < 2:
+            pros.append(f"Very low short interest ({sf:.1f}%) — bears not positioned against this")
+        elif sf > 15:
+            cons.append(f"High short interest ({sf:.1f}%) — significant bearish conviction or squeeze risk")
+        elif sf > 8:
+            cons.append(f"Moderate-high short interest ({sf:.1f}%)")
+
+    # ── Macro regime ─────────────────────────────────────────────────────────
+    regime = macro.get("regime", "")
+    tailwinds = macro.get("sector_tailwinds", [])
+    headwinds = macro.get("sector_headwinds", [])
+    if sector in tailwinds:
+        pros.append(f"Sector tailwind — {sector} benefits from current {regime} macro regime")
+    elif sector in headwinds:
+        cons.append(f"Sector headwind — {sector} faces pressure in current {regime} regime")
+
+    # ── BTC / liquidity ──────────────────────────────────────────────────────
+    btc_regime = btc.get("regime", "")
+    tech_sectors = {"Information Technology", "Communication Services", "Consumer Discretionary"}
+    if btc_regime == "risk_on" and sector in tech_sectors:
+        pros.append(f"BTC risk-on signal supports growth/tech positioning")
+    elif btc_regime == "safe_haven" and sector in tech_sectors:
+        cons.append(f"BTC/Gold divergence indicates risk-off — headwind for growth stocks")
+
+    # ── Relevant Polymarket events ───────────────────────────────────────────
+    keywords = SECTOR_EVENT_KEYWORDS.get(sector, [])
+    relevant_events = []
+    for m in poly:
+        q = m["question"].lower()
+        if any(k in q for k in keywords):
+            relevant_events.append(m)
+
+    # Interpret top events as pros/cons
+    for ev in relevant_events[:3]:
+        prob = ev["probability"]
+        q = ev["question"]
+        q_lower = q.lower()
+        if sector == "Energy" and any(k in q_lower for k in ["iran", "russia", "opec", "oil"]):
+            if prob > 0.3:
+                pros.append(f"Polymarket: '{q}' — {prob:.0%} yes (energy supply risk = oil tailwind)")
+        if sector == "Financials" and "no fed rate cut" in q_lower:
+            if prob > 0.5:
+                cons.append(f"Polymarket: '{q}' — {prob:.0%} yes (rates staying high = margin pressure)")
+        if sector == "Information Technology" and any(k in q_lower for k in ["taiwan", "china"]):
+            if prob > 0.1:
+                cons.append(f"Polymarket: '{q}' — {prob:.0%} yes (supply chain risk for tech)")
+
+    # ── Verdict ──────────────────────────────────────────────────────────────
+    if score >= 65:
+        verdict = "STRONG BUY"
+        verdict_color = "#00a854"
+    elif score >= 60:
+        verdict = "BUY"
+        verdict_color = "#1db954"
+    elif score >= 55:
+        verdict = "WATCH"
+        verdict_color = "#f39c12"
+    else:
+        verdict = "HOLD"
+        verdict_color = "#888"
+
+    return {
+        "verdict": verdict,
+        "verdict_color": verdict_color,
+        "pros": pros,
+        "cons": cons,
+        "sub_scores": sub,
+        "relevant_events": relevant_events,
+        "macro_context": f"{regime.title()} regime · Risk: {macro.get('risk_level','?')} · BTC: {btc_regime.replace('_',' ')}",
+        "fundamentals": fund,
+        "insider": insider,
+        "options": options,
+        "short": short,
+    }
+
 DATA_DIR = Path("data")
 SIGNALS_FILE = DATA_DIR / "signals.json"
 RATINGS_FILE = DATA_DIR / "ratings_report.json"
@@ -81,8 +264,8 @@ collected_at = signals.get("collected_at", "unknown")
 st.caption(f"Data collected: {collected_at}  ·  Universe: {signals.get('universe_size', '?')} assets")
 
 # ── Tabs ─────────────────────────────────────────────────────────────────────
-tab_ratings, tab_signals, tab_events, tab_news = st.tabs(
-    ["📈 Ratings", "🌐 Macro Signals", "⚡ Events", "📰 News"]
+tab_ratings, tab_deep, tab_signals, tab_events, tab_news = st.tabs(
+    ["📈 Ratings", "💡 Deep Dive", "🌐 Macro Signals", "⚡ Events", "📰 News"]
 )
 
 # ═══════════════════════════════════════════════════════
@@ -153,10 +336,130 @@ with tab_ratings:
         fig = px.bar(sector_avg, x="Sector", y="Score", color="Score",
                      color_continuous_scale="RdYlGn", range_color=[40, 70])
         fig.update_layout(height=350, margin=dict(t=20, b=40))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
 # ═══════════════════════════════════════════════════════
-# TAB 2 — MACRO SIGNALS
+# ═══════════════════════════════════════════════════════
+# TAB 2 — DEEP DIVE
+# ═══════════════════════════════════════════════════════
+with tab_deep:
+    fast_scores = signals.get("fast_scores", {})
+    DEEP_THRESHOLD = 60
+    top_tickers = sorted(
+        [(t, v) for t, v in fast_scores.items() if v.get("score", 0) >= DEEP_THRESHOLD],
+        key=lambda x: x[1]["score"], reverse=True
+    )
+
+    if not top_tickers:
+        st.info(f"No assets scored ≥{DEEP_THRESHOLD}. Run full collect_all.py (not --fast).")
+    else:
+        st.markdown(
+            f"**{len(top_tickers)} assets** scored ≥{DEEP_THRESHOLD} — detailed signal analysis below."
+        )
+        st.caption("Sub-scores weighted: Earnings 25% · Insider 20% · Macro 15% · Geo 15% · Fundamentals 15% · Options 5% · WSB/Short 5%")
+
+        for ticker, entry in top_tickers:
+            score = entry["score"]
+            grade = entry.get("grade", "?")
+            sector = entry.get("sector", "")
+            asset_type = entry.get("type", "stock")
+
+            dive = build_deep_dive(ticker, signals)
+
+            badge_color = GRADE_COLOR.get(grade, "#888")
+            verdict = dive["verdict"]
+            v_color = dive["verdict_color"]
+
+            header = (
+                f'<span style="font-size:1.15em;font-weight:bold">{ticker}</span>&nbsp;&nbsp;'
+                f'<span style="background:{badge_color};color:#000;padding:2px 8px;border-radius:4px;font-weight:bold;font-size:0.85em">{grade}</span>&nbsp;&nbsp;'
+                f'<span style="background:{v_color};color:#fff;padding:2px 10px;border-radius:4px;font-weight:bold;font-size:0.85em">{verdict}</span>&nbsp;&nbsp;'
+                f'<span style="color:#888;font-size:0.9em">{sector} · {asset_type} · Score {score}/100</span>'
+            )
+
+            with st.expander(f"{ticker}  {grade}  {verdict}  —  score {score}  ·  {sector}", expanded=(score >= 65)):
+                st.markdown(header, unsafe_allow_html=True)
+                st.caption(dive["macro_context"])
+                st.divider()
+
+                col_pro, col_con = st.columns(2)
+                with col_pro:
+                    st.markdown("**✅ Pros**")
+                    if dive["pros"]:
+                        for p in dive["pros"]:
+                            st.markdown(f"- {p}")
+                    else:
+                        st.caption("No strong positives identified")
+
+                with col_con:
+                    st.markdown("**❌ Cons**")
+                    if dive["cons"]:
+                        for c in dive["cons"]:
+                            st.markdown(f"- {c}")
+                    else:
+                        st.caption("No major negatives identified")
+
+                st.divider()
+
+                # Sub-score breakdown bar chart
+                sub = dive["sub_scores"]
+                if sub:
+                    st.markdown("**Signal Breakdown**")
+                    sub_labels = {
+                        "earnings": "Earnings (25%)",
+                        "insider": "Insider Flow (20%)",
+                        "macro": "Macro Regime (15%)",
+                        "geo": "Geopolitical (15%)",
+                        "fundamentals": "Fundamentals (15%)",
+                        "options": "Options Flow (5%)",
+                        "wsb_short": "WSB/Short (5%)",
+                    }
+                    sub_df = pd.DataFrame([
+                        {"Signal": sub_labels.get(k, k), "Score": v, "Color": "#27ae60" if v >= 60 else ("#e84118" if v < 40 else "#f39c12")}
+                        for k, v in sub.items()
+                    ])
+                    fig = px.bar(sub_df, x="Score", y="Signal", orientation="h",
+                                 color="Color", color_discrete_map="identity",
+                                 range_x=[0, 100])
+                    fig.add_vline(x=50, line_dash="dash", line_color="#666")
+                    fig.update_layout(height=260, margin=dict(t=10, b=10, l=0, r=20),
+                                      showlegend=False, yaxis_title=None)
+                    st.plotly_chart(fig, width="stretch")
+
+                # Key metrics table
+                fund = dive["fundamentals"]
+                ins = dive["insider"]
+                opt = dive["options"]
+                sht = dive["short"]
+                if any([fund, ins, opt, sht]):
+                    st.markdown("**Key Metrics**")
+                    m1, m2, m3, m4, m5, m6 = st.columns(6)
+                    m1.metric("P/E", f"{fund.get('pe_ratio', 'N/A'):.1f}x" if fund.get("pe_ratio") else "N/A")
+                    m2.metric("Rev Growth", f"{fund.get('revenue_growth_yoy', 0):+.1f}%" if fund.get("revenue_growth_yoy") is not None else "N/A")
+                    m3.metric("ROE", f"{fund.get('return_on_equity', 0):.1f}%" if fund.get("return_on_equity") else "N/A")
+                    m4.metric("Put-Call", f"{opt.get('put_call_ratio', 'N/A'):.2f}" if opt.get("put_call_ratio") else "N/A")
+                    m5.metric("Short Float", f"{sht.get('short_float_pct', 'N/A'):.1f}%" if sht.get("short_float_pct") is not None else "N/A")
+                    m6.metric("Insider", ins.get("signal", "N/A").replace("_", " ").title())
+
+                # Relevant Polymarket events
+                rel_ev = dive["relevant_events"]
+                if rel_ev:
+                    st.divider()
+                    st.markdown("**Relevant Events (Polymarket)**")
+                    for ev in rel_ev[:5]:
+                        prob = ev["probability"]
+                        bar_fill = int(prob * 16)
+                        bar = "█" * bar_fill + "░" * (16 - bar_fill)
+                        st.markdown(
+                            f"`{bar}` **{prob:.0%}** — {ev['question']}  \n"
+                            f"<span style='color:#888;font-size:0.8em'>vol ${ev['volume']:,.0f} · ends {ev.get('end_date','?')[:10]}</span>",
+                            unsafe_allow_html=True,
+                        )
+
+        st.divider()
+        st.caption(f"Threshold: score ≥{DEEP_THRESHOLD}. Scores refresh every 5 min when data/signals.json updates.")
+
+# TAB 3 — MACRO SIGNALS
 # ═══════════════════════════════════════════════════════
 with tab_signals:
     macro = signals.get("macro", {})

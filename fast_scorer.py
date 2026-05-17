@@ -140,25 +140,43 @@ def score_all_assets(signals: dict) -> dict[str, dict]:
 
     results = {}
     for ticker, asset_meta in universe_map.items():
-        score = compute_composite_score(
-            ticker=ticker,
-            asset_meta=asset_meta,
-            earnings_data=earnings.get(ticker, {}),
-            insider_data=insider.get(ticker, {}),
-            macro_signal=macro,
-            events=events,
-            fund_data=fundamentals.get(ticker, {}),
-            price_data=price_data.get(ticker, {}),
-            price_stats=price_stats,
-            options_data=options.get(ticker, {}),
-            short_data=short_interest.get(ticker, {}),
-            wsb_ticker_data=wsb.get(ticker, {}),
-        )
+        sector = asset_meta.get("sector", "")
+        e_data = earnings.get(ticker, {})
+        i_data = insider.get(ticker, {})
+        f_data = fundamentals.get(ticker, {})
+        p_data = price_data.get(ticker, {})
+        o_data = options.get(ticker, {})
+        s_data = short_interest.get(ticker, {})
+        w_data = wsb.get(ticker, {})
+
+        s_earnings = compute_earnings_score(e_data)
+        s_insider = compute_insider_score(i_data)
+        s_macro = compute_macro_score(sector, macro)
+        s_geo = compute_geo_score(ticker, asset_meta, events)
+        s_fund = compute_fundamentals_score(f_data, p_data, price_stats)
+        s_options = compute_options_score(o_data)
+        s_wsb = compute_wsb_short_score(s_data, w_data)
+
+        composite = max(0, min(100, round(
+            0.25 * s_earnings + 0.20 * s_insider + 0.15 * s_macro +
+            0.15 * s_geo + 0.15 * s_fund + 0.05 * s_options + 0.05 * s_wsb
+        )))
+
         results[ticker] = {
-            "score": score,
-            "sector": asset_meta.get("sector", ""),
+            "score": composite,
+            "grade": score_to_grade(composite),
+            "sector": sector,
             "region": asset_meta.get("region", ""),
             "type": asset_meta.get("type", "stock"),
+            "sub_scores": {
+                "earnings": s_earnings,
+                "insider": s_insider,
+                "macro": s_macro,
+                "geo": s_geo,
+                "fundamentals": s_fund,
+                "options": s_options,
+                "wsb_short": s_wsb,
+            },
         }
     return results
 
