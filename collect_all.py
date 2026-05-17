@@ -31,6 +31,7 @@ from tools.btc_tools import fetch_btc_signal
 from tools.sentiment_tools import fetch_market_sentiment
 from tools.news_polymarket_bridge import build_news_market_summary
 from tools.wsb_trend import compute_retail_trend
+from tools.theme_detector import score_themes
 from tools.macro_extended_tools import (
     fetch_bond_yields, fetch_currencies,
     fetch_sector_etf_performance, fetch_extended_commodities,
@@ -176,6 +177,14 @@ def collect(fast: bool = False) -> dict:
         "commodities_ext": commodities_ext,
         "news_market_bridge": news_market_summary,
         "retail_trend": retail_trend,
+        "themes": [],  # filled after signals dict is built
+    }
+
+    # Score themes (needs full signals dict)
+    themes = score_themes(signals)
+    signals["themes"] = themes
+    top3 = [f"{t['label']} ({t['composite']:.0f})" for t in themes[:3]]
+    print(f"      Top themes: {' | '.join(top3)}")
         "universe_map": {k: {"sector": v.get("sector", ""), "region": v.get("region", ""),
                              "type": v.get("type", "stock"), "name": v.get("name", "")}
                          for k, v in universe_map.items()},
@@ -187,15 +196,14 @@ def collect(fast: bool = False) -> dict:
     fg_rating = sentiment.get("fear_greed", {}).get("rating", "?")
     print(f"      VIX {vix_val} · Fear/Greed {fg_score} ({fg_rating}) · credit spreads {sentiment.get('credit_spreads', {}).get('spread_regime', '?')}")
 
-    # Cross-reference: news → markets + WSB trend
+    # Cross-reference: news → markets + WSB trend + theme scoring
     all_poly_markets = poly_geo + poly_macro + poly_company
     headlines = news_data.get("headlines", [])
     news_market_summary = build_news_market_summary(headlines, all_poly_markets)
     print(f"      News-market bridge: {news_market_summary['coverage_pct']}% of markets have news support")
-    print(f"      Top news topics: {[t for t, _ in news_market_summary['top_topics'][:5]]}")
 
     retail_trend = compute_retail_trend(wsb_signal, universe_map, short_data)
-    print(f"      Retail trend ({retail_trend['trend_direction']}): {retail_trend['narrative'][:80]}")
+    print(f"      Retail trend: {retail_trend['trend_direction']} — {retail_trend['narrative'][:70]}")
 
     print("\n[fast-scorer] Computing composite scores...")
     fast_scores = score_all_assets(signals)

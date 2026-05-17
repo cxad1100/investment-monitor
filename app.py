@@ -688,28 +688,35 @@ with st.container():
             st.markdown("---")
 
     with col_right:
-        # ── Retail Trend (WSB) ─────────────────────────────────────────────
+        # ── Cross-source market themes ─────────────────────────────────────
+        themes = signals.get("themes", [])
         retail = signals.get("retail_trend", {})
+        st.markdown("#### Market Themes")
+        st.caption("Score = news 35% + WSB 25% + Polymarket 25% + macro 15%")
+
+        if themes:
+            for t in themes[:8]:
+                comp = t["composite"]
+                if comp < 5:
+                    continue
+                bar_n = int(min(comp, 50) / 50 * 10)
+                bar = "█" * bar_n + "░" * (10 - bar_n)
+                sources = []
+                if t["news_score"] > 5:  sources.append(f"News {t['news_score']:.0f}")
+                if t["wsb_score"] > 10:  sources.append(f"WSB {t['wsb_score']:.0f}")
+                if t["poly_score"] > 5:  sources.append(f"Poly {t['poly_score']:.0f}")
+                src_str = " · ".join(sources) if sources else "low signal"
+                st.markdown(f"`{bar}` **{t['label']}** {comp:.0f}  \n<span style='color:#888;font-size:0.78em'>{src_str}</span>", unsafe_allow_html=True)
+
+        st.markdown("")
         if retail:
             direction = retail.get("trend_direction", "mixed")
             dir_label = {"risk_on": "RISK ON", "defensive": "DEFENSIVE", "mixed": "MIXED"}.get(direction, direction.upper())
-            st.markdown(f"#### Retail Trend — {dir_label}")
+            st.markdown(f"**Retail: {dir_label}**")
             st.caption(retail.get("narrative", ""))
-            for sm in retail.get("sector_momentum", [])[:5]:
-                bar = "█" * int(sm["score"] * 8) + "░" * (8 - int(sm["score"] * 8))
-                st.markdown(f"`{bar}` {sm['wsb_label']} ({sm['momentum']})")
-            sq = retail.get("squeeze_plays", [])
-            if sq:
-                st.markdown(f"Squeeze watch: {', '.join(s['ticker'] for s in sq[:3])}")
 
         st.markdown("")
-        st.markdown("#### News Themes")
-        for theme, count in world["news_themes"]:
-            bar = "█" * min(count, 8) + "░" * (8 - min(count, 8))
-            st.markdown(f"`{bar}` {theme} ({count})")
-
-        st.markdown("")
-        st.markdown("#### Sector Outlook")
+        st.markdown("**Sector Outlook**")
         for s in world["tailwinds"][:3]:
             st.markdown(f"+ {s}")
         for s in world["headwinds"][:3]:
@@ -761,10 +768,14 @@ def _render_deep_dive(ticker: str, score: int, grade: str, sector: str, asset_ty
     if sub:
         st.markdown("**Signal Breakdown**")
         sub_labels = {
-            "earnings": "Earnings (25%)", "insider": "Insider Flow (20%)",
-            "macro": "Macro Regime (15%)", "geo": "Geopolitical (15%)",
-            "fundamentals": "Fundamentals (15%)", "options": "Options Flow (5%)",
-            "wsb_short": "WSB / Short Interest (5%)",
+            "earnings":    "Earnings / Analyst (22%)",
+            "insider":     "Insider Flow (18%)",
+            "macro":       "Macro Regime (12%)",
+            "geo":         "Geopolitical Events (10%)",
+            "fundamentals":"Fundamentals (15%)",
+            "options":     "Options Flow (5%)",
+            "wsb_short":   "WSB / Short (3%)",
+            "momentum":    "Market Momentum (15%)",
         }
         sub_df = pd.DataFrame([
             {"Signal": sub_labels.get(k, k), "Score": v,

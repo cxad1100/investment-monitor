@@ -42,6 +42,30 @@ def compute_macro_score(sector: str, macro_signal: dict) -> float:
     return 50.0
 
 
+def compute_momentum_score(ticker: str, sector: str, themes: list[dict]) -> float:
+    """
+    Cross-source momentum score 0-100.
+
+    Aggregates news + WSB + Polymarket interest for the stock's sector/ticker.
+    High score = strong multi-source attention (AI hype, energy geopolitics, etc.).
+    """
+    if not themes:
+        return 50.0
+
+    best = 0.0
+    for t in themes:
+        if sector in t.get("sectors", []) or ticker in t.get("key_tickers", []):
+            best = max(best, t.get("composite", 0.0))
+
+    # Normalise: themes max out around 40-60 in practice; rescale to 0-100
+    # Raw composite > 30 is strong, > 15 is moderate, < 5 is no signal
+    if best >= 30:
+        return min(100.0, 50.0 + (best - 30) * 2.5)
+    if best >= 15:
+        return 50.0 + (best - 15) * 0.0   # neutral band
+    return max(0.0, 50.0 - (15 - best) * 1.5)
+
+
 def compute_geo_score(ticker: str, asset_meta: dict, events: list[dict]) -> float:
     """Geopolitical exposure score: base 50, adjusted by event impacts."""
     sector = asset_meta.get("sector", "")
@@ -140,17 +164,18 @@ def compute_composite_score(
 
 def score_all_assets(signals: dict) -> dict[str, dict]:
     """Run fast scorer over all assets in signals.json."""
-    universe_map = signals.get("universe_map", {})
-    earnings = signals.get("earnings", {})
-    insider = signals.get("insider", {})
-    macro = signals.get("macro", {})
-    events = signals.get("events", [])
-    fundamentals = signals.get("fundamentals", {})
-    price_data = signals.get("price_data", {})
-    price_stats = signals.get("price_stats", {"avg_return_1y": 0})
-    options = signals.get("options", {})
-    short_interest = signals.get("short_interest", {})
-    wsb = signals.get("wsb", {}).get("ticker_mentions", {})
+    universe_map  = signals.get("universe_map", {})
+    earnings      = signals.get("earnings", {})
+    insider       = signals.get("insider", {})
+    macro         = signals.get("macro", {})
+    events        = signals.get("events", [])
+    fundamentals  = signals.get("fundamentals", {})
+    price_data    = signals.get("price_data", {})
+    price_stats   = signals.get("price_stats", {"avg_return_1y": 0})
+    options       = signals.get("options", {})
+    short_interest= signals.get("short_interest", {})
+    wsb_mentions  = signals.get("wsb", {}).get("ticker_mentions", {})
+    themes        = signals.get("themes", [])
 
     results = {}
     for ticker, asset_meta in universe_map.items():
@@ -161,19 +186,28 @@ def score_all_assets(signals: dict) -> dict[str, dict]:
         p_data = price_data.get(ticker, {})
         o_data = options.get(ticker, {})
         s_data = short_interest.get(ticker, {})
-        w_data = wsb.get(ticker, {})
+        w_data = wsb_mentions.get(ticker, {})
 
-        s_earnings = compute_earnings_score(e_data, f_data)
-        s_insider = compute_insider_score(i_data)
-        s_macro = compute_macro_score(sector, macro)
-        s_geo = compute_geo_score(ticker, asset_meta, events)
-        s_fund = compute_fundamentals_score(f_data, p_data, price_stats)
-        s_options = compute_options_score(o_data)
-        s_wsb = compute_wsb_short_score(s_data, w_data)
+        s_earnings  = compute_earnings_score(e_data, f_data)
+        s_insider   = compute_insider_score(i_data)
+        s_macro     = compute_macro_score(sector, macro)
+        s_geo       = compute_geo_score(ticker, asset_meta, events)
+        s_fund      = compute_fundamentals_score(f_data, p_data, price_stats)
+        s_options   = compute_options_score(o_data)
+        s_wsb       = compute_wsb_short_score(s_data, w_data)
+        s_momentum  = compute_momentum_score(ticker, sector, themes)
 
+        # Weights: Earnings 22% | Insider 18% | Macro 12% | Geo 10% |
+        #          Fundamentals 15% | Options 5% | WSB 3% | Momentum 15%
         composite = max(0, min(100, round(
-            0.25 * s_earnings + 0.20 * s_insider + 0.15 * s_macro +
-            0.15 * s_geo + 0.15 * s_fund + 0.05 * s_options + 0.05 * s_wsb
+            0.22 * s_earnings +
+            0.18 * s_insider  +
+            0.12 * s_macro    +
+            0.10 * s_geo      +
+            0.15 * s_fund     +
+            0.05 * s_options  +
+            0.03 * s_wsb      +
+            0.15 * s_momentum
         )))
 
         results[ticker] = {
@@ -183,13 +217,14 @@ def score_all_assets(signals: dict) -> dict[str, dict]:
             "region": asset_meta.get("region", ""),
             "type": asset_meta.get("type", "stock"),
             "sub_scores": {
-                "earnings": s_earnings,
-                "insider": s_insider,
-                "macro": s_macro,
-                "geo": s_geo,
+                "earnings":   s_earnings,
+                "insider":    s_insider,
+                "macro":      s_macro,
+                "geo":        s_geo,
                 "fundamentals": s_fund,
-                "options": s_options,
-                "wsb_short": s_wsb,
+                "options":    s_options,
+                "wsb_short":  s_wsb,
+                "momentum":   s_momentum,
             },
         }
     return results
