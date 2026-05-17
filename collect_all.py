@@ -19,7 +19,7 @@ from config import FRED_API_KEY
 from tools.universe_manager import refresh_universe, load_universe
 from tools.fred_tools import fetch_fred_series, classify_regime
 from tools.futures_tools import fetch_futures_signal
-from tools.polymarket_tools import fetch_geopolitical_markets, fetch_earnings_markets
+from tools.polymarket_tools import fetch_all_investment_markets
 from tools.gdelt_tools import fetch_regional_conflict_indices
 from tools.news_tools import fetch_news_headlines
 from tools.yfinance_tools import fetch_price_history, fetch_fundamentals
@@ -94,9 +94,11 @@ def collect(fast: bool = False) -> dict:
     }
 
     print("[4/9] Polymarket prediction markets...")
-    poly_geo = fetch_geopolitical_markets()
-    poly_earnings = fetch_earnings_markets()
-    print(f"      {len(poly_geo)} geo markets, {len(poly_earnings)} earnings markets")
+    poly_data = fetch_all_investment_markets()
+    poly_geo = poly_data["geo"]
+    poly_macro = poly_data["macro"]
+    poly_company = poly_data["company"]
+    print(f"      {len(poly_geo)} geo · {len(poly_macro)} macro · {len(poly_company)} company markets")
 
     print("[5/9] GDELT regional conflict indices...")
     gdelt_data = fetch_regional_conflict_indices()
@@ -133,6 +135,8 @@ def collect(fast: bool = False) -> dict:
         "rated_ticker_count": len(rated_tickers),
         "macro": macro_signal,
         "polymarket_geo": poly_geo,
+        "polymarket_macro": poly_macro,
+        "polymarket_company": poly_company,
         "gdelt": gdelt_data,
         "news": news_data,
         "price_data": price_data,

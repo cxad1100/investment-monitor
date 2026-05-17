@@ -7,195 +7,220 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-# ── Event group definitions ──────────────────────────────────────────────────
-# Each group: keywords to match markets, sectors it's relevant to,
-# and per-sector causal impact description.
-EVENT_GROUPS = [
-    {
-        "id": "fed_rates",
-        "name": "Fed Rate Policy",
-        "icon": "🏦",
-        "keywords": ["fed rate", "rate cut", "rate hike", "federal reserve", "interest rate"],
-        "relevant_sectors": {"Financials", "Real Estate", "Utilities", "Information Technology",
-                             "Consumer Discretionary", "Consumer Staples", "Industrials"},
-        "aggregate": "implied_cuts",
-        "impact": {
-            "Financials": "Higher-for-longer rates widen net interest margins (NIM) for banks short-term, but slow loan growth and raise credit default risk. If cuts stay at 0-1 in 2026, bank profitability holds — but watch for credit quality deterioration in H2.",
-            "Real Estate": "Rate persistence is the key headwind. REITs trade inversely to yields — elevated rates compress cap rates and property valuations. Each 25bp cut would add ~3-5% to REIT NAV.",
-            "Utilities": "Utilities compete with bonds for yield-seeking capital. High rates make their dividends less attractive vs risk-free returns, compressing multiples. A sector to avoid until first cut.",
-            "Information Technology": "High discount rates compress growth stock multiples. The longer rates stay elevated, the more near-term cash flow matters vs long-term growth projections — a headwind for high-multiple tech.",
-            "Consumer Discretionary": "High rates squeeze consumer credit (mortgages, auto loans, credit cards), reducing discretionary spending capacity.",
-            "default": "Rate environment shapes cost of capital and equity multiples across the market.",
-        },
-    },
-    {
-        "id": "iran",
-        "name": "Iran / Middle East",
-        "icon": "🛢️",
-        "keywords": ["iran", "invade iran", "iranian regime", "iran nuke", "iran deal"],
-        "relevant_sectors": {"Energy", "Industrials", "Consumer Discretionary", "Materials", "Consumer Staples"},
-        "aggregate": "conflict_risk",
-        "impact": {
-            "Energy": "Iran conflict risks Strait of Hormuz closure (~20% of global oil transit). A US-Iran war would spike Brent crude $20-40+/barrel instantly. Conversely, nuclear deal (59% probability) could add 1-2M bbl/day of Iranian supply, pressuring oil prices. Net: asymmetric energy risk — bullish on conflict, bearish on deal.",
-            "Industrials": "Defense contractors (aerospace & defense sub-sector) directly benefit from escalation — higher procurement, emergency spending authorizations. Iran scenario is a catalyst for LMT, RTX, NOC-type names.",
-            "Consumer Discretionary": "Oil spike from Iran conflict raises fuel costs for consumers and logistics, compressing margins and reducing spending power.",
-            "Consumer Staples": "Food and staples companies face input cost pressure from energy-driven logistics costs. Modest headwind.",
-            "default": "Iran geopolitics drive oil price volatility which propagates through energy-linked input costs.",
-        },
-    },
-    {
-        "id": "china_taiwan",
-        "name": "China / Taiwan",
-        "icon": "🚢",
-        "keywords": ["taiwan", "china invade", "china x taiwan", "china blockade", "china military"],
-        "relevant_sectors": {"Information Technology", "Industrials", "Consumer Discretionary", "Materials"},
-        "aggregate": "conflict_risk",
-        "impact": {
-            "Information Technology": "Taiwan produces ~90% of the world's advanced semiconductors (TSMC). A blockade or invasion would create a multi-year supply shock for chips — NVIDIA, AMD, Apple, AMAT, LRCX all critically dependent. Even a 10% conflict probability justifies diversification premium.",
-            "Industrials": "Supply chain disruption risk from Taiwan conflict hits industrial equipment manufacturers dependent on precision components. Defense sector benefits from elevated NATO/US spending.",
-            "Consumer Discretionary": "Electronics, appliances, and auto sectors face severe inventory shortfalls if Taiwan supply disrupted — comparable to 2020-2021 chip shortage but structurally worse.",
-            "Materials": "Rare earth and specialty chemical supply chains routed through China face secondary sanction risk in a conflict scenario.",
-            "default": "Taiwan conflict would be the most severe supply chain shock since WWII — systemic risk.",
-        },
-    },
-    {
-        "id": "russia_ukraine",
-        "name": "Russia / Ukraine / NATO",
-        "icon": "🪖",
-        "keywords": ["russia invade nato", "zelenskyy", "ukraine peace", "ukraine joins nato", "ukraine election"],
-        "relevant_sectors": {"Energy", "Industrials", "Materials", "Financials"},
-        "aggregate": "conflict_risk",
-        "impact": {
-            "Energy": "Ukraine peace deal (positive for European energy security) vs NATO escalation (negative — energy embargo risk). Natural gas prices in Europe tied to war resolution.",
-            "Industrials": "European defense rearmament (NATO 2% GDP pledge enforcement) is a structural tailwind for defense/aerospace regardless of war outcome.",
-            "Materials": "Russia controls ~40% of global palladium, significant nickel and aluminum. Sanction changes on deal or escalation move materials prices.",
-            "Financials": "European bank exposure to Russian assets and Ukraine reconstruction financing — deal = reconstruction opportunity, escalation = credit losses.",
-            "default": "War resolution path drives European growth outlook and energy prices.",
-        },
-    },
-    {
-        "id": "bitcoin",
-        "name": "Bitcoin / Crypto",
-        "icon": "₿",
-        "keywords": ["bitcoin", "btc", "crypto"],
-        "relevant_sectors": {"Information Technology", "Financials", "Communication Services"},
-        "aggregate": "btc_range",
-        "impact": {
-            "Information Technology": "Bitcoin functions as a risk-on/risk-off barometer for growth assets. BTC holding above $80k signals institutional risk appetite — supportive for high-multiple tech. A BTC crash to $35-45k range (32-50% probability per markets) would signal broad risk-off, hitting tech multiples.",
-            "Financials": "Crypto-adjacent fintechs (Coinbase, PayPal, Block) tied directly. Traditional banks with crypto custody/trading exposure also affected. BTC rally = fee revenue uplift.",
-            "Communication Services": "Advertising and platform companies see correlation with crypto sentiment — crypto bull cycles drive user engagement and ad spend in tech/gaming verticals.",
-            "default": "Bitcoin is a leading indicator of risk appetite — direction matters more than absolute level.",
-        },
-    },
-    {
-        "id": "recession",
-        "name": "US Recession",
-        "icon": "📉",
-        "keywords": ["recession", "gdp contraction"],
-        "relevant_sectors": {"Consumer Discretionary", "Financials", "Industrials", "Materials",
-                             "Information Technology", "Consumer Staples", "Utilities", "Healthcare"},
-        "aggregate": "probability",
-        "impact": {
-            "Consumer Discretionary": "Recession is the primary tail risk — consumer spending contracts sharply. Discretionary is the most cyclically exposed sector; revenue can drop 15-30% in deep recessions.",
-            "Financials": "Recession triggers loan loss provisions, credit card defaults, and deal flow collapse. Bank stocks typically fall 30-50% peak-to-trough in recessions.",
-            "Industrials": "Capital expenditure freezes in recessions — industrial demand collapses. Companies with backlog visibility hold better than spot-order businesses.",
-            "Information Technology": "Enterprise IT budgets are cut early in recessions. However, cloud/SaaS companies with sticky contracts prove more resilient than hardware or ad-driven businesses.",
-            "Consumer Staples": "Recession-resistant — consumers still buy food, household products. Staples tend to outperform as defensive rotation destination.",
-            "Utilities": "Recession-proof by nature — electricity/gas demand inelastic. Plus rate cuts likely accompany recession, benefiting utility valuations.",
-            "Healthcare": "Defensive in recessions — healthcare demand inelastic, government spending supports hospitals and pharma.",
-            "Materials": "Highly cyclical — demand collapses with industrial production. Copper and steel prices crash in recessions.",
-            "default": "Recession (22% probability) is the key tail risk — review cyclical vs defensive positioning.",
-        },
-    },
-]
+import re as _re
 
-# Sector → group IDs that are relevant (for ordering)
-SECTOR_EVENT_KEYWORDS = {
-    "Energy": ["iran", "oil", "opec", "russia", "ukraine"],
-    "Information Technology": ["china", "taiwan", "bitcoin", "semiconductor"],
-    "Financials": ["fed rate", "rate cut", "recession", "rate hike", "interest rate"],
-    "Materials": ["china", "copper", "russia", "tariff"],
-    "Industrials": ["tariff", "trade war", "china"],
-    "Consumer Discretionary": ["recession", "tariff"],
-    "Consumer Staples": ["recession"],
-    "Utilities": ["fed rate", "rate cut", "recession", "interest rate"],
-    "Healthcare": ["recession"],
-    "Real Estate": ["fed rate", "recession", "interest rate"],
-    "Communication Services": ["china"],
+# ── Sector → relevant event group IDs ───────────────────────────────────────
+SECTOR_GROUPS = {
+    "Energy":                  ["iran_me", "russia_ukraine", "recession"],
+    "Information Technology":  ["fomc_next", "fed_annual", "china_taiwan", "bitcoin", "ai_tech", "recession"],
+    "Financials":              ["fomc_next", "fed_annual", "recession"],
+    "Materials":               ["china_taiwan", "russia_ukraine", "recession"],
+    "Industrials":             ["china_taiwan", "russia_ukraine", "recession"],
+    "Consumer Discretionary":  ["fomc_next", "fed_annual", "recession"],
+    "Consumer Staples":        ["recession"],
+    "Utilities":               ["fomc_next", "fed_annual", "recession"],
+    "Healthcare":              ["recession"],
+    "Real Estate":             ["fomc_next", "fed_annual", "recession"],
+    "Communication Services":  ["china_taiwan", "ai_tech", "bitcoin"],
+}
+
+# ── Impact descriptions: causal chain per sector ─────────────────────────────
+IMPACT = {
+    "fomc_next": {
+        "Financials":             "Next-meeting rate decision directly reprices bank NIM expectations. A cut compresses NIMs immediately; hold = margin stability.",
+        "Information Technology": "Rate cuts reduce the discount rate on future cash flows, re-rating growth multiples upward. Each 25bp cut adds ~2-4% to DCF-derived fair values for high-multiple tech.",
+        "Utilities":              "Rate-sensitive sector: cut = immediate NAV expansion as dividend yield spread vs risk-free improves.",
+        "Real Estate":            "25bp cut lowers mortgage rates ~20bp with 4-8 week lag, stimulating transaction volume and compressing cap rates.",
+        "Consumer Discretionary": "Rate cut relieves consumer credit pressure (mortgages, auto, card rates), boosting spending capacity.",
+        "default":                "Next FOMC decision reprices risk-free rate and equity discount rates across the board.",
+    },
+    "fed_annual": {
+        "Financials":             "Full-year rate path determines NIM trajectory. 0 cuts = NIM stable but credit risk builds through year; 2+ cuts = spread compression, potential delinquency relief.",
+        "Information Technology": "Prolonged high rates sustain multiple compression on growth stocks. Market pricing ~29% chance of any 2026 cut — status quo favors cash-flow-positive tech over high-multiple names.",
+        "Utilities":              "Each cut adds 3-5% to utility NAV. With 71% probability of zero cuts, utilities remain structurally disadvantaged vs bonds.",
+        "Real Estate":            "Rate path determines whether REIT valuations stabilize or continue compressing. Zero-cut scenario = continued headwind.",
+        "default":                "Annual rate path shapes cost of capital and equity multiples for the full year.",
+    },
+    "iran_me": {
+        "Energy":                 "Iran conflict risks Strait of Hormuz closure (~20% of global oil transit) → Brent spike $20-40+/bbl. Nuclear deal (59% probability) = 1-2M bbl/day supply addition, pressuring prices. Net: bullish on war, bearish on deal.",
+        "Industrials":            "Defense contractors (LMT, RTX, NOC) benefit directly from escalation — emergency procurement, supplemental defense budgets.",
+        "Consumer Discretionary": "Oil spike drives fuel cost surge, crushing logistics margins and reducing consumer discretionary spend.",
+        "Consumer Staples":       "Input cost pressure via energy-driven logistics. Modest but persistent headwind on margins.",
+        "default":                "Iran drives oil price volatility, propagating through energy-linked input costs across sectors.",
+    },
+    "china_taiwan": {
+        "Information Technology": "Taiwan hosts ~90% of advanced semiconductor capacity (TSMC). Military clash = multi-year chip supply shock worse than 2021. NVDA, AMD, AAPL, AMAT, LRCX face direct exposure.",
+        "Industrials":            "Precision component supply disruption hits industrial equipment; defense contractors benefit from NATO/US spending surge.",
+        "Consumer Discretionary": "Electronics inventory depletion comparable to 2021 chip shortage — but structurally more severe and longer duration.",
+        "Materials":              "China-linked rare earth and specialty chemical supply chains face secondary sanction risk.",
+        "default":                "Taiwan conflict = most severe supply chain shock in decades. Systemic risk with limited hedge.",
+    },
+    "russia_ukraine": {
+        "Energy":                 "Peace deal → European energy security improvement, gas prices normalize. Escalation → embargo risk, energy spike.",
+        "Industrials":            "European defense rearmament (NATO 2% GDP target) is structural tailwind for aerospace & defense regardless of war outcome.",
+        "Materials":              "Russia controls ~40% of global palladium, major nickel/aluminum supplier. Sanction changes on deal or escalation reprice these commodities.",
+        "Financials":             "Deal = European bank reconstruction financing opportunity. Escalation = credit losses on Russian exposure.",
+        "default":                "War resolution path shapes European growth outlook and commodity supply.",
+    },
+    "bitcoin": {
+        "Information Technology": "BTC above $80k = institutional risk-on confirmed → supportive of high-multiple tech. Crash to $35-45k (32-50% probability) = broad risk-off signal, tech multiple compression.",
+        "Financials":             "Crypto-adjacent fintechs (COIN, PYPL, SQ) directly correlated. Banks with crypto custody see fee uplift in bull cycles.",
+        "Communication Services": "Crypto bull cycles drive user engagement and ad spend in gaming/social verticals.",
+        "default":                "Bitcoin is the clearest real-time leading indicator of institutional risk appetite.",
+    },
+    "ai_tech": {
+        "Information Technology": "AI model leadership (Google vs OpenAI vs DeepSeek) determines cloud/chip revenue share. Google maintaining #1 = GCP, TPU demand sustained. DeepSeek winning = inference cost collapse, bad for NVDA compute revenue.",
+        "Communication Services": "AI search and advertising efficiency determines long-run ad revenue per query. Google/Meta AI leadership directly affects margin structure.",
+        "default":                "AI competitive dynamics shape cloud revenue, chip demand, and productivity gains across the economy.",
+    },
+    "recession": {
+        "Consumer Discretionary": "Recession = primary existential risk. Revenue drops 15-30% in severe downturns. First sector sold in risk-off.",
+        "Financials":             "Loan loss provisions surge, deal flow collapses, credit card defaults rise. Banks typically fall 30-50% peak-to-trough.",
+        "Industrials":            "Capex freezes early. Backlog-heavy businesses hold better than spot-order; services more resilient than equipment.",
+        "Information Technology": "Enterprise IT budgets cut immediately. SaaS with multi-year contracts outperforms; hardware and ad-driven models hit hard.",
+        "Consumer Staples":       "Recession-resistant — food, household products demand inelastic. Classic defensive rotation destination.",
+        "Utilities":              "Recession-proof: electricity/gas demand inelastic. Rate cuts that accompany recessions boost utility valuations.",
+        "Healthcare":             "Defensive: healthcare demand inelastic, government programs support pharma/hospital revenue.",
+        "Materials":              "Highly cyclical — copper and steel crash with industrial production. Worst sector in recessions after Discretionary.",
+        "default":                "22% recession probability is the key tail risk — cyclicals vulnerable, defensives outperform.",
+    },
 }
 
 
-def group_polymarket_events(poly: list[dict]) -> list[dict]:
-    """Assign each Polymarket market to a thematic group and compute aggregate signal."""
-    grouped = {g["id"]: {"meta": g, "markets": []} for g in EVENT_GROUPS}
-    unmatched = []
+def _agg_fomc_next(markets: list[dict]) -> tuple[str, float]:
+    """For next-meeting markets: probability distribution across outcomes."""
+    cut50 = next((m["probability"] for m in markets if "decrease" in m["question"].lower() and "50" in m["question"]), 0)
+    cut25 = next((m["probability"] for m in markets if "decrease" in m["question"].lower() and "25" in m["question"]), 0)
+    hold  = next((m["probability"] for m in markets if "no change" in m["question"].lower()), 0)
+    hike25 = next((m["probability"] for m in markets if "increase" in m["question"].lower() and "25" in m["question"]), 0)
+    hike50 = next((m["probability"] for m in markets if "increase" in m["question"].lower() and "50" in m["question"]), 0)
+    total_cut = round(cut25 + cut50, 2)
+    if total_cut + hold + hike25 + hike50 == 0:
+        return f"{len(markets)} meeting scenarios", 0.5
+    parts = []
+    if total_cut > 0.01: parts.append(f"cut {total_cut:.0%}")
+    if hold > 0.01: parts.append(f"hold {hold:.0%}")
+    if hike25 + hike50 > 0.01: parts.append(f"hike {hike25+hike50:.0%}")
+    dominant = max(total_cut, hold, hike25 + hike50)
+    return " · ".join(parts) if parts else f"{len(markets)} scenarios", dominant
 
-    for m in poly:
-        q = m["question"].lower()
-        matched = False
-        for g in EVENT_GROUPS:
-            if any(k in q for k in g["keywords"]):
-                grouped[g["id"]]["markets"].append(m)
-                matched = True
-                break
-        if not matched:
-            unmatched.append(m)
 
-    results = []
-    for gid, data in grouped.items():
-        markets = data["markets"]
-        if not markets:
-            continue
-        meta = data["meta"]
-        agg_type = meta["aggregate"]
+def _agg_fed_annual(markets: list[dict]) -> tuple[str, float]:
+    """Expected number of 2026 cuts from Polymarket probabilities."""
+    no_cut = next((m["probability"] for m in markets if "no fed rate cut" in m["question"].lower()), None)
+    hike   = next((m["probability"] for m in markets if "rate hike in 2026" in m["question"].lower()), 0)
+    if no_cut is not None:
+        p_any_cut = round(1 - no_cut, 2)
+        signal = f"no cuts {no_cut:.0%} · ≥1 cut {p_any_cut:.0%}"
+        if hike > 0.05:
+            signal += f" · hike {hike:.0%}"
+        return signal, max(no_cut, p_any_cut)
+    return f"{len(markets)} annual rate scenarios", 0.5
 
-        if agg_type == "implied_cuts":
-            # Fed: compute implied cuts from probabilities
-            no_cut_prob = next((m["probability"] for m in markets if "no fed rate cut" in m["question"].lower()), None)
-            one_cut = next((m["probability"] for m in markets if "will 1 fed rate cut" in m["question"].lower()), 0)
-            two_cut = next((m["probability"] for m in markets if "will 2 fed rate cut" in m["question"].lower()), 0)
-            if no_cut_prob is not None:
-                p_any_cut = round(1 - no_cut_prob, 2)
-                signal_text = f"{no_cut_prob:.0%} chance of no cuts in 2026 · {p_any_cut:.0%} chance of ≥1 cut"
-                dominant_prob = max(no_cut_prob, p_any_cut)
-            else:
-                signal_text = f"{len(markets)} rate scenarios priced"
-                dominant_prob = 0.5
 
-        elif agg_type == "btc_range":
-            dip_55 = next((m["probability"] for m in markets if "55,000" in m["question"]), 0)
-            dip_45 = next((m["probability"] for m in markets if "45,000" in m["question"]), 0)
-            above_100 = next((m["probability"] for m in markets if "100,000" in m["question"] and "reach" in m["question"].lower()), 0)
-            above_150 = next((m["probability"] for m in markets if "150k" in m["question"].lower() or "150,000" in m["question"]), 0)
-            signal_text = (
-                f"Below $55k: {dip_55:.0%} · Below $45k: {dip_45:.0%} · "
-                f"Above $100k: {above_100:.0%} · Above $150k: {above_150:.0%}"
-            )
-            dominant_prob = above_100
+def _agg_btc(markets: list[dict]) -> tuple[str, float]:
+    """BTC implied price range from multiple price-level markets."""
+    def _prob_for(keyword: str) -> float:
+        m = next((m for m in markets if keyword in m["question"]), None)
+        return m["probability"] if m else 0.0
+    above_100 = _prob_for("100,000") or _prob_for("100k")
+    above_150 = _prob_for("150k") or _prob_for("150,000")
+    dip_55    = _prob_for("55,000")
+    dip_45    = _prob_for("45,000")
+    parts = [f"above $100k: {above_100:.0%}", f"dip <$55k: {dip_55:.0%}", f"dip <$45k: {dip_45:.0%}"]
+    return " · ".join(parts), above_100
 
-        elif agg_type == "conflict_risk":
-            # Take max probability across conflict markets
-            probs = [m["probability"] for m in markets]
-            dominant_prob = max(probs) if probs else 0
-            avg_prob = sum(probs) / len(probs) if probs else 0
-            signal_text = f"{len(markets)} scenarios · peak probability {dominant_prob:.0%}"
 
-        else:  # probability
-            dominant_prob = markets[0]["probability"] if markets else 0
-            signal_text = f"{dominant_prob:.0%} probability"
+def _agg_conflict(markets: list[dict]) -> tuple[str, float]:
+    probs = [m["probability"] for m in markets]
+    peak = max(probs) if probs else 0
+    top = sorted(markets, key=lambda m: m["probability"], reverse=True)[:2]
+    desc = " · ".join(f"{m['question'][:50]}… {m['probability']:.0%}" for m in top)
+    return desc, peak
 
-        results.append({
-            "id": gid,
-            "name": meta["name"],
-            "icon": meta["icon"],
-            "signal_text": signal_text,
-            "dominant_prob": dominant_prob,
-            "relevant_sectors": meta["relevant_sectors"],
-            "impact": meta["impact"],
-            "markets": sorted(markets, key=lambda x: x["volume"], reverse=True),
-        })
 
-    return sorted(results, key=lambda x: x["dominant_prob"], reverse=True)
+def _agg_generic(markets: list[dict]) -> tuple[str, float]:
+    if not markets:
+        return "no markets", 0
+    m = max(markets, key=lambda x: x["volume"])
+    return f"{m['question'][:60]}… {m['probability']:.0%}", m["probability"]
+
+
+def _group(gid: str, name: str, icon: str, markets: list[dict],
+           relevant_sectors: set, agg_fn) -> dict | None:
+    if not markets:
+        return None
+    signal_text, dominant_prob = agg_fn(markets)
+    return {
+        "id": gid,
+        "name": name,
+        "icon": icon,
+        "signal_text": signal_text,
+        "dominant_prob": dominant_prob,
+        "relevant_sectors": relevant_sectors,
+        "impact": IMPACT.get(gid, {}),
+        "markets": sorted(markets, key=lambda x: x["volume"], reverse=True),
+    }
+
+
+def group_polymarket_events(signals: dict) -> list[dict]:
+    """Group all Polymarket markets from signals dict into named thematic groups.
+
+    Uses geo/macro/company sub-lists from collect_all to avoid re-fetching.
+    Falls back to polymarket_geo only if new keys absent (backward compat).
+    """
+    geo     = signals.get("polymarket_geo", [])
+    macro   = signals.get("polymarket_macro", [])
+    company = signals.get("polymarket_company", [])
+    all_m   = geo + macro + company
+
+    def pick(fn) -> list[dict]:
+        return [m for m in all_m if fn(m["question"].lower())]
+
+    # FOMC next-meeting: "decrease interest rate … after the … meeting"
+    fomc_next_m = pick(lambda q: ("decrease interest rate" in q or "increase interest rate" in q
+                                   or "no change in fed interest rate" in q) and "after the" in q)
+    # Fed annual path: "N fed rate cuts happen in 2026", "rate hike in 2026"
+    fed_annual_m = pick(lambda q: ("fed rate cut" in q or "rate cut happen in 2026" in q
+                                    or "rate hike in 2026" in q))
+    # Iran/Middle East
+    iran_m = pick(lambda q: any(k in q for k in ["iran", "invade iran", "iranian regime", "iranian"]))
+    # China/Taiwan
+    tw_m = pick(lambda q: any(k in q for k in ["taiwan", "china invade", "china x taiwan",
+                                                  "china blockade", "china military clash"]))
+    # Russia/Ukraine/NATO
+    ru_m = pick(lambda q: any(k in q for k in ["russia invade nato", "zelenskyy", "ukraine peace",
+                                                  "ukraine joins nato", "ukraine signs", "ukraine election"]))
+    # Bitcoin price range
+    btc_m = pick(lambda q: any(k in q for k in ["bitcoin hit", "bitcoin reach", "bitcoin dip",
+                                                   "btc hit", "btc reach"]))
+    # AI / tech leadership
+    ai_m = pick(lambda q: any(k in q for k in ["best ai model", "top ai model", "ipo before",
+                                                  "ipo by", "ipo day", "largest company",
+                                                  "spacex", "databricks", "kraken ipo", "stripe ipo"]))
+    # Recession
+    rec_m = pick(lambda q: "recession" in q and "by end of" in q)
+
+    groups = [
+        _group("fomc_next",     "FOMC Next Meeting",       "🏦", fomc_next_m,
+               {"Financials","Information Technology","Utilities","Real Estate","Consumer Discretionary"}, _agg_fomc_next),
+        _group("fed_annual",    "Fed Rate Path 2026",      "📅", fed_annual_m,
+               {"Financials","Information Technology","Utilities","Real Estate","Consumer Discretionary","Consumer Staples"}, _agg_fed_annual),
+        _group("iran_me",       "Iran / Middle East",       "🛢️", iran_m,
+               {"Energy","Industrials","Consumer Discretionary","Consumer Staples","Materials"}, _agg_conflict),
+        _group("china_taiwan",  "China / Taiwan",           "🚢", tw_m,
+               {"Information Technology","Industrials","Consumer Discretionary","Materials","Communication Services"}, _agg_conflict),
+        _group("russia_ukraine","Russia / Ukraine / NATO",  "🪖", ru_m,
+               {"Energy","Industrials","Materials","Financials"}, _agg_conflict),
+        _group("bitcoin",       "Bitcoin Range",            "₿",  btc_m,
+               {"Information Technology","Financials","Communication Services"}, _agg_btc),
+        _group("ai_tech",       "AI / Tech / IPO Pipeline", "🤖", ai_m,
+               {"Information Technology","Communication Services"}, _agg_generic),
+        _group("recession",     "US Recession Risk",        "📉", rec_m,
+               {"Consumer Discretionary","Financials","Industrials","Materials",
+                "Information Technology","Consumer Staples","Utilities","Healthcare"}, _agg_generic),
+    ]
+    return [g for g in groups if g is not None and g["markets"]]
 
 
 def _fmt_pct(v, suffix="%") -> str:
@@ -217,7 +242,6 @@ def build_deep_dive(ticker: str, signals: dict) -> dict:
     short = signals.get("short_interest", {}).get(ticker, {})
     macro = signals.get("macro", {})
     btc = signals.get("btc", {})
-    poly = signals.get("polymarket_geo", [])
 
     pros, cons = [], []
 
@@ -352,34 +376,36 @@ def build_deep_dive(ticker: str, signals: dict) -> dict:
         cons.append(f"BTC/Gold divergence indicates risk-off — headwind for growth stocks")
 
     # ── Relevant event groups ────────────────────────────────────────────────
-    all_groups = group_polymarket_events(poly)
+    all_groups = group_polymarket_events(signals)
     relevant_groups = [g for g in all_groups if sector in g["relevant_sectors"]]
 
     # Add event-group signals to pros/cons
-    for grp in relevant_groups[:3]:
+    for grp in relevant_groups[:4]:
         prob = grp["dominant_prob"]
         gid = grp["id"]
-        if gid == "fed_rates" and sector in {"Financials"}:
-            no_cut = next((m["probability"] for m in grp["markets"] if "no fed rate cut" in m["question"].lower()), 0)
-            if no_cut > 0.6:
-                pros.append(f"Rates staying high (Polymarket: {no_cut:.0%} no cuts in 2026) — bank NIM benefits")
-        elif gid == "fed_rates" and sector in {"Utilities", "Real Estate", "Information Technology"}:
-            no_cut = next((m["probability"] for m in grp["markets"] if "no fed rate cut" in m["question"].lower()), 0)
+        if gid in ("fomc_next", "fed_annual") and sector in {"Financials"}:
+            no_cut = next((m["probability"] for m in grp["markets"] if "no fed rate cut" in m["question"].lower()
+                           or "no change" in m["question"].lower()), 0)
             if no_cut > 0.5:
-                cons.append(f"High-rate persistence (Polymarket: {no_cut:.0%} no cuts in 2026) — valuation headwind")
-        elif gid == "iran" and sector == "Energy":
-            conflict_prob = max((m["probability"] for m in grp["markets"] if "invade" in m["question"].lower() or "regime" in m["question"].lower()), default=0)
-            if conflict_prob > 0.2:
-                pros.append(f"Iran conflict risk (Polymarket: {conflict_prob:.0%}) — oil supply shock scenario = energy tailwind")
+                pros.append(f"Rate hold (Polymarket: {no_cut:.0%}) — NIM stability for banks")
+        elif gid in ("fomc_next", "fed_annual") and sector in {"Utilities", "Real Estate", "Information Technology"}:
+            no_cut = next((m["probability"] for m in grp["markets"] if "no fed rate cut" in m["question"].lower()
+                           or "no change" in m["question"].lower()), 0)
+            if no_cut > 0.5:
+                cons.append(f"Rate hold (Polymarket: {no_cut:.0%}) — valuation headwind for {sector}")
+        elif gid == "iran_me" and sector == "Energy":
+            conflict_p = max((m["probability"] for m in grp["markets"]
+                              if "invade" in m["question"].lower() or "regime" in m["question"].lower()), default=0)
+            if conflict_p > 0.15:
+                pros.append(f"Iran conflict risk {conflict_p:.0%} (Polymarket) — Hormuz closure scenario = oil price spike")
         elif gid == "china_taiwan" and sector == "Information Technology":
             if prob > 0.05:
-                cons.append(f"China/Taiwan conflict risk (Polymarket: {prob:.0%}) — semiconductor supply chain tail risk")
-        elif gid == "recession" and sector in {"Consumer Discretionary", "Financials", "Materials"}:
-            if prob > 0.15:
-                cons.append(f"Recession risk (Polymarket: {prob:.0%}) — cyclical sector exposure")
-        elif gid == "recession" and sector in {"Consumer Staples", "Utilities", "Healthcare"}:
-            if prob > 0.15:
-                pros.append(f"Defensive sector — outperforms in recession scenarios (Polymarket: {prob:.0%} recession risk)")
+                cons.append(f"China/Taiwan risk {prob:.0%} (Polymarket) — TSMC supply chain tail risk for semiconductors")
+        elif gid == "recession":
+            if sector in {"Consumer Discretionary", "Financials", "Materials"} and prob > 0.15:
+                cons.append(f"Recession risk {prob:.0%} (Polymarket) — cyclical sector most exposed")
+            elif sector in {"Consumer Staples", "Utilities", "Healthcare"} and prob > 0.15:
+                pros.append(f"Defensive positioning: outperforms in recession scenarios ({prob:.0%} market-implied risk)")
 
     # ── Verdict ──────────────────────────────────────────────────────────────
     if score >= 65:
@@ -401,7 +427,7 @@ def build_deep_dive(ticker: str, signals: dict) -> dict:
         "pros": pros,
         "cons": cons,
         "sub_scores": sub,
-        "relevant_groups": relevant_groups,
+        "relevant_groups": [g for g in all_groups if sector in g["relevant_sectors"]],
         "macro_context": f"{regime.title()} regime · Risk: {macro.get('risk_level','?')} · BTC: {btc_regime.replace('_',' ')}",
         "fundamentals": fund,
         "insider": insider,
@@ -804,11 +830,12 @@ with tab_signals:
 # ═══════════════════════════════════════════════════════
 with tab_events:
     st.subheader("Polymarket — Grouped Event Analysis")
-    poly = signals.get("polymarket_geo", [])
-    if not poly:
+    _total_pm = len(signals.get("polymarket_geo", [])) + len(signals.get("polymarket_macro", [])) + len(signals.get("polymarket_company", []))
+    if _total_pm == 0:
         st.info("No Polymarket data.")
     else:
-        all_groups = group_polymarket_events(poly)
+        st.caption(f"{_total_pm} markets across geo · macro · company categories")
+        all_groups = group_polymarket_events(signals)
         for grp in all_groups:
             prob = grp["dominant_prob"]
             alert = "🔴" if prob > 0.4 else ("🟡" if prob > 0.15 else "🟢")
