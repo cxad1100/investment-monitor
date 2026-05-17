@@ -577,6 +577,8 @@ def build_world_summary(signals: dict) -> dict:
         "fg_rating": sentiment.get("fear_greed", {}).get("rating", ""),
         "vix": sentiment.get("vix", {}).get("vix"),
         "vix_regime": sentiment.get("vix", {}).get("regime", ""),
+        "vix_1y_low": sentiment.get("vix", {}).get("vix_1y_low"),
+        "vix_1y_high": sentiment.get("vix", {}).get("vix_1y_high"),
         "spread_regime": sentiment.get("credit_spreads", {}).get("spread_regime", ""),
         "interactions": interactions,
         "news_themes": news_themes[:4],
@@ -665,15 +667,52 @@ world = build_world_summary(signals)
 with st.container():
     st.markdown("## World View")
 
+    _regime_desc = {
+        "growth":      "GDP expanding, earnings growing, risk assets outperforming. Favours cyclicals: Technology, Consumer Discretionary, Financials.",
+        "inflation":   "Prices rising faster than growth. Hard assets and commodities outperform. Favours Energy, Materials, short-duration assets.",
+        "stagflation": "Slow growth + high inflation. Worst combo for equities. Defensives (Staples, Healthcare, Utilities) and commodities preferred.",
+        "deflation":   "Falling prices, weak demand. Bonds outperform. Defensives and dividend stocks hold value; avoid cyclicals.",
+        "recession":   "Economic contraction. Earnings falling broadly. Capital preservation priority; Staples, Utilities, Healthcare, cash.",
+    }
+    _risk_desc = {
+        "low":    "Low volatility, tight credit spreads, strong momentum. Risk assets broadly supported.",
+        "medium": "Mixed signals — some caution warranted. Selective positioning; favour quality over momentum.",
+        "high":   "Elevated uncertainty. Credit spreads widening, volatility rising. Reduce cyclical exposure, increase defensives.",
+    }
+
     m1, m2, m3, m4, m5, m6 = st.columns(6)
-    m1.metric("Macro Regime", world["regime"].title())
-    m2.metric("Risk Level", world["risk_level"].upper())
+    m1.metric("Macro Regime", world["regime"].title(),
+              help=_regime_desc.get(world["regime"], "Current macroeconomic regime derived from FRED indicators: Fed funds rate, CPI trend, yield curve, GDP growth."))
+    m2.metric("Risk Level", world["risk_level"].upper(),
+              help=_risk_desc.get(world["risk_level"], "Composite risk assessment combining regime uncertainty, credit spreads, and VIX level."))
     vix = world.get("vix")
-    m3.metric("VIX", f"{vix:.1f}  {world['vix_regime'].replace('_',' ')}" if vix else "N/A")
+    m3.metric("VIX", f"{vix:.1f}  {world['vix_regime'].replace('_',' ')}" if vix else "N/A",
+              help=(
+                  "CBOE Volatility Index — measures 30-day implied volatility of S&P 500 options. "
+                  "Below 15: complacency. 15-20: calm. 20-25: elevated. 25-30: fear. Above 30: extreme fear. "
+                  f"Current 1Y range: {world.get('vix_1y_low','?')} – {world.get('vix_1y_high','?')}."
+              ))
     fg = world.get("fg_score")
-    m4.metric("Fear / Greed", f"{fg:.0f}  {world['fg_rating'].replace('_',' ').title()}" if fg else "N/A")
-    m5.metric("Credit Spreads", world["spread_regime"].title() or "N/A")
-    m6.metric("Liquidity Signal", world["btc_regime"].replace("_", " ").title() or "N/A")
+    m4.metric("Fear / Greed", f"{fg:.0f}  {world['fg_rating'].replace('_',' ').title()}" if fg else "N/A",
+              help=(
+                  "CNN Fear & Greed Index (0–100). Aggregates 7 signals: market momentum, stock price strength, "
+                  "stock price breadth, put/call ratio, junk bond demand, market volatility, safe haven demand. "
+                  "0–25: Extreme Fear. 25–45: Fear. 45–55: Neutral. 55–75: Greed. 75–100: Extreme Greed. "
+                  "Contrarian signal: extreme greed often precedes corrections."
+              ))
+    m5.metric("Credit Spreads", world["spread_regime"].title() or "N/A",
+              help=(
+                  "HYG/LQD spread proxy — measures the difference in returns between high-yield (HYG) and "
+                  "investment-grade (LQD) bonds. Widening spreads signal rising default risk and credit stress, "
+                  "typically a leading indicator of equity market weakness. Tightening = risk appetite improving."
+              ))
+    m6.metric("Liquidity Signal", world["btc_regime"].replace("_", " ").title() or "N/A",
+              help=(
+                  "Bitcoin vs Gold relative performance as a liquidity proxy. "
+                  "Risk-On: BTC outperforming Gold — institutional risk appetite elevated, growth assets supported. "
+                  "Safe-Haven: Gold outperforming BTC — flight to quality, defensive rotation likely. "
+                  "Risk-Off: both falling — broad liquidity withdrawal."
+              ))
 
     st.divider()
 
