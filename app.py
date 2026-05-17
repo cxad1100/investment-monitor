@@ -763,12 +763,6 @@ with st.container():
 
     st.divider()
 
-# ── Tabs ─────────────────────────────────────────────────────────────────────
-tab_ratings, tab_signals, tab_events, tab_news = st.tabs(
-    ["Ratings", "Macro Signals", "Events", "News"]
-)
-
-# ── Shared deep-dive renderer (used inside each rating expander) ──────────────
 def _render_deep_dive(ticker: str, score: int, grade: str, sector: str, asset_type: str, signals: dict):
     dive = build_deep_dive(ticker, signals)
     company_name = signals.get("fundamentals", {}).get(ticker, {}).get("name", "")
@@ -871,8 +865,154 @@ def _render_deep_dive(ticker: str, score: int, grade: str, sector: str, asset_ty
                     )
 
 
+# ── Tabs ─────────────────────────────────────────────────────────────────────
+tab_portfolio, tab_ratings, tab_signals, tab_events, tab_news = st.tabs(
+    ["Portfolio", "Ratings", "Macro Signals", "Events", "News"]
+)
+
+# ── Portfolio ────────────────────────────────────────────────────────────────
+@st.cache_data(ttl=900)
+def load_portfolio():
+    from tools.portfolio_tools import parse_portfolio, fetch_current_prices, compute_portfolio_summary
+    portfolio_path = DATA_DIR / "portfolio.csv"
+    if not portfolio_path.exists():
+        return None, None
+    portfolio = parse_portfolio(portfolio_path)
+    prices = fetch_current_prices(portfolio["holdings"])
+    summary = compute_portfolio_summary(portfolio, prices)
+    return portfolio, summary
+
+with tab_portfolio:
+    portfolio, summary = load_portfolio()
+    if portfolio is None:
+        st.info("No portfolio.csv found in data/")
+    else:
+        fast_scores = signals.get("fast_scores", {})
+        fundamentals = signals.get("fundamentals", {})
+        themes = signals.get("themes", [])
+
+        tot = summary["totals"]
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Portfolio Value", f"€{tot['current_value']:,.2f}")
+        c2.metric("Invested", f"€{tot['total_invested']:,.2f}")
+        c3.metric("Unrealized P&L", f"€{tot['unrealized_pnl']:+,.2f}",
+                  delta=f"{tot['unrealized_pct']:+.1f}%",
+                  delta_color="normal")
+        c4.metric("Realized P&L", f"€{tot['realized_pnl']:+.2f}")
+        c5.metric("Total P&L", f"€{tot['total_pnl']:+,.2f}")
+
+        st.divider()
+
+        # ── Position table ───────────────────────────────────────────────────
+        st.markdown("#### Positions")
+
+        # Build display rows
+        rows = []
+        for pos in summary["positions"]:
+            tk = pos["ticker"]
+            # Try to find rating — direct match or common alias
+            score_entry = fast_scores.get(tk, {})
+            grade = score_entry.get("grade", "—")
+            score = score_entry.get("score", None)
+            # Company name: from our fundamentals or leave as ticker
+            name = fundamentals.get(tk, {}).get("name", "")
+            pnl_color = "normal"
+            rows.append({
+                "Ticker":    tk,
+                "Company":   name or tk,
+                "Shares":    pos["shares"],
+                "Avg Cost €": pos["avg_cost"],
+                "Price €":   pos["current_price"] or "—",
+                "Value €":   pos["position_value"],
+                "P&L €":     pos["unrealized_pnl"],
+                "P&L %":     pos["unrealized_pct"],
+                "Grade":     grade,
+                "Score":     int(score) if score is not None else None,
+            })
+
+        pos_df = pd.DataFrame(rows).set_index("Ticker")
+
+        st.dataframe(
+            pos_df,
+            width="stretch",
+            column_config={
+                "Value €":   st.column_config.NumberColumn(format="€%.2f"),
+                "P&L €":     st.column_config.NumberColumn(format="€%+.2f"),
+                "P&L %":     st.column_config.NumberColumn(format="%+.1f%%"),
+                "Avg Cost €": st.column_config.NumberColumn(format="€%.2f"),
+                "Price €":   st.column_config.NumberColumn(format="€%.2f"),
+                "Score":     st.column_config.ProgressColumn("Score", min_value=0, max_value=100, format="%d"),
+            },
+            height=380,
+        )
+
+        # ── Realized closes ──────────────────────────────────────────────────
+        realized = summary["realized_detail"]
+        if realized:
+            st.divider()
+            st.markdown("#### Closed Positions")
+            r_rows = []
+            for tk, r in realized.items():
+                r_rows.append({
+                    "Ticker": tk,
+                    "Shares Sold": r["shares_sold"],
+                    "Proceeds €": round(r["proceeds"], 2),
+                    "Realized P&L €": round(r["pnl_eur"], 2),
+                })
+            r_df = pd.DataFrame(r_rows).set_index("Ticker")
+            st.dataframe(r_df, width="stretch",
+                         column_config={
+                             "Proceeds €": st.column_config.NumberColumn(format="€%.2f"),
+                             "Realized P&L €": st.column_config.NumberColumn(format="€%+.2f"),
+                         })
+
+        # ── Per-position analysis ─────────────────────────────────────────────
+        st.divider()
+        st.markdown("#### Position Analysis")
+        sel_pos = st.selectbox(
+            "Select position",
+            options=[p["ticker"] for p in summary["positions"]],
+            format_func=lambda t: f"{t}  —  €{next(p['position_value'] for p in summary['positions'] if p['ticker']==t):,.2f}  ({next(p['unrealized_pct'] for p in summary['positions'] if p['ticker']==t):+.1f}%)",
+        )
+        if sel_pos:
+            pos = next(p for p in summary["positions"] if p["ticker"] == sel_pos)
+            sc_entry = fast_scores.get(sel_pos, {})
+
+            col_l, col_r = st.columns([1, 2])
+            with col_l:
+                st.markdown(f"**{sel_pos}**")
+                st.markdown(f"Shares: {pos['shares']:.4f}")
+                st.markdown(f"Avg cost: €{pos['avg_cost']:.2f}")
+                st.markdown(f"Current: €{pos['current_price'] or '—'}")
+                st.markdown(f"Position value: €{pos['position_value']:,.2f}")
+                st.markdown(f"P&L: €{pos['unrealized_pnl']:+.2f} ({pos['unrealized_pct']:+.1f}%)")
+                st.markdown(f"First bought: {pos['first_buy']}")
+                if sc_entry:
+                    badge_color = GRADE_COLOR.get(sc_entry.get("grade",""), "#888")
+                    st.markdown(
+                        f"Rating: <span style='background:{badge_color};color:#000;padding:2px 8px;border-radius:3px;font-weight:bold'>"
+                        f"{sc_entry.get('grade','—')}</span>  Score: {sc_entry.get('score','—')}",
+                        unsafe_allow_html=True,
+                    )
+
+            with col_r:
+                if sc_entry:
+                    sector = sc_entry.get("sector", "")
+                    asset_type = sc_entry.get("type", "stock")
+                    _render_deep_dive(sel_pos, sc_entry.get("score", 0), sc_entry.get("grade", "?"),
+                                      sector, asset_type, signals)
+                else:
+                    st.info(f"{sel_pos} not in our rated universe — no signal breakdown available.")
+
+                    # Show relevant themes even without score
+                    matched_themes = [t for t in themes if sel_pos in t.get("key_tickers", [])]
+                    if matched_themes:
+                        st.markdown("**Relevant Themes:**")
+                        for t in matched_themes:
+                            st.markdown(f"- {t['label']}: composite {t['composite']:.0f}/100")
+
 # ═══════════════════════════════════════════════════════
-# TAB 1 — RATINGS
+# TAB 2 — RATINGS
 # ═══════════════════════════════════════════════════════
 with tab_ratings:
     fast_scores = signals.get("fast_scores", {})
