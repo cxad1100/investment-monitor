@@ -703,12 +703,111 @@ with st.container():
     st.divider()
 
 # ── Tabs ─────────────────────────────────────────────────────────────────────
-tab_ratings, tab_deep, tab_signals, tab_events, tab_news = st.tabs(
-    ["Ratings", "Deep Dive", "Macro Signals", "Events", "News"]
+tab_ratings, tab_signals, tab_events, tab_news = st.tabs(
+    ["Ratings", "Macro Signals", "Events", "News"]
 )
 
+# ── Shared deep-dive renderer (used inside each rating expander) ──────────────
+def _render_deep_dive(ticker: str, score: int, grade: str, sector: str, asset_type: str, signals: dict):
+    dive = build_deep_dive(ticker, signals)
+    company_name = signals.get("fundamentals", {}).get(ticker, {}).get("name", "")
+    badge_color = GRADE_COLOR.get(grade, "#888")
+    verdict = dive["verdict"]
+    v_color = dive["verdict_color"]
+
+    header = (
+        f'<span style="font-size:1.1em;font-weight:bold">{ticker}</span>'
+        + (f'&nbsp;&nbsp;<span style="color:#aaa">{company_name}</span>' if company_name and company_name != ticker else "")
+        + f'&nbsp;&nbsp;<span style="background:{badge_color};color:#000;padding:2px 8px;border-radius:3px;font-weight:bold;font-size:0.82em">{grade}</span>'
+        + f'&nbsp;&nbsp;<span style="background:{v_color};color:#fff;padding:2px 10px;border-radius:3px;font-weight:bold;font-size:0.82em">{verdict}</span>'
+        + f'&nbsp;&nbsp;<span style="color:#888;font-size:0.82em">{sector} · {asset_type} · Score {score}/100</span>'
+    )
+    st.markdown(header, unsafe_allow_html=True)
+    st.caption(dive["macro_context"])
+    st.divider()
+
+    col_pro, col_con = st.columns(2)
+    with col_pro:
+        st.markdown("**Pros**")
+        for p in dive["pros"]:
+            st.markdown(f"- {p}")
+        if not dive["pros"]:
+            st.caption("No strong positives identified")
+    with col_con:
+        st.markdown("**Cons**")
+        for c in dive["cons"]:
+            st.markdown(f"- {c}")
+        if not dive["cons"]:
+            st.caption("No major negatives identified")
+
+    st.divider()
+
+    sub = dive["sub_scores"]
+    if sub:
+        st.markdown("**Signal Breakdown**")
+        sub_labels = {
+            "earnings": "Earnings (25%)", "insider": "Insider Flow (20%)",
+            "macro": "Macro Regime (15%)", "geo": "Geopolitical (15%)",
+            "fundamentals": "Fundamentals (15%)", "options": "Options Flow (5%)",
+            "wsb_short": "WSB / Short Interest (5%)",
+        }
+        sub_df = pd.DataFrame([
+            {"Signal": sub_labels.get(k, k), "Score": v,
+             "Color": "#2e7d32" if v >= 60 else ("#c62828" if v < 40 else "#e65100")}
+            for k, v in sub.items()
+        ])
+        fig = px.bar(sub_df, x="Score", y="Signal", orientation="h",
+                     color="Color", color_discrete_map="identity", range_x=[0, 100])
+        fig.add_vline(x=50, line_dash="dash", line_color="#555")
+        fig.update_layout(height=240, margin=dict(t=8, b=8, l=0, r=16),
+                          showlegend=False, yaxis_title=None,
+                          plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
+        st.plotly_chart(fig, width="stretch", key=f"subchart_{ticker}")
+
+    fund = dive["fundamentals"]
+    ins  = dive["insider"]
+    opt  = dive["options"]
+    sht  = dive["short"]
+    if any([fund, ins, opt, sht]):
+        st.markdown("**Key Metrics**")
+        r1c1, r1c2, r1c3, r1c4 = st.columns(4)
+        r2c1, r2c2, r2c3, r2c4 = st.columns(4)
+        r1c1.metric("P/E", f"{fund.get('pe_ratio'):.1f}x" if fund.get("pe_ratio") else "N/A")
+        r1c2.metric("Revenue Growth", f"{fund.get('revenue_growth_yoy'):+.1f}%" if fund.get("revenue_growth_yoy") is not None else "N/A")
+        r1c3.metric("ROE", f"{fund.get('return_on_equity'):.1f}%" if fund.get("return_on_equity") else "N/A")
+        r1c4.metric("Analyst Rating", fund.get("analyst_rating", "N/A").title())
+        upside_val = fund.get("upside_pct")
+        r2c1.metric("Upside to Target", f"{upside_val:+.1f}%" if upside_val is not None else "N/A",
+                    delta=f"Target ${fund.get('target_price','?')}" if upside_val is not None else None)
+        r2c2.metric("Put-Call Ratio", f"{opt.get('put_call_ratio'):.2f}" if opt.get("put_call_ratio") else "N/A")
+        r2c3.metric("Short Float", f"{sht.get('short_float_pct'):.1f}%" if sht.get("short_float_pct") is not None else "N/A")
+        r2c4.metric("Next Earnings", fund.get("next_earnings", "N/A"))
+
+    rel_groups = dive["relevant_groups"]
+    if rel_groups:
+        st.divider()
+        st.markdown("**Event Risk Analysis**")
+        for grp in rel_groups:
+            sector_impact = grp["impact"].get(sector, grp["impact"].get("default", ""))
+            prob = grp["dominant_prob"]
+            alert = "HIGH" if prob > 0.4 else ("MED" if prob > 0.15 else "LOW")
+            with st.expander(f"[{alert}] {grp['name']} — {grp['signal_text']}", expanded=False):
+                if sector_impact:
+                    st.markdown(f"**Impact on {sector}:** {sector_impact}")
+                st.markdown("---")
+                for ev in grp["markets"]:
+                    p = ev["probability"]
+                    bar_fill = int(p * 14)
+                    bar = "█" * bar_fill + "░" * (14 - bar_fill)
+                    st.markdown(
+                        f"`{bar}` **{p:.0%}** {ev['question']}  "
+                        f"<span style='color:#888;font-size:0.75em'>vol ${ev['volume']/1e6:.1f}M · ends {ev.get('end_date','?')[:10]}</span>",
+                        unsafe_allow_html=True,
+                    )
+
+
 # ═══════════════════════════════════════════════════════
-# TAB 1 — RATINGS
+# TAB 1 — RATINGS (with inline expandable detail)
 # ═══════════════════════════════════════════════════════
 with tab_ratings:
     fast_scores = signals.get("fast_scores", {})
@@ -725,14 +824,14 @@ with tab_ratings:
 
         st.divider()
 
-        # Filters
-        fc1, fc2, fc3 = st.columns(3)
+        fc1, fc2, fc3, fc4 = st.columns(4)
         sectors = ["All"] + sorted(df["Sector"].dropna().unique().tolist())
-        types = ["All"] + sorted(df["Type"].dropna().unique().tolist())
+        types   = ["All"] + sorted(df["Type"].dropna().unique().tolist())
         regions = ["All"] + sorted(df["Region"].dropna().unique().tolist())
         sel_sector = fc1.selectbox("Sector", sectors)
-        sel_type = fc2.selectbox("Type", types)
+        sel_type   = fc2.selectbox("Type", types)
         sel_region = fc3.selectbox("Region", regions)
+        min_score  = fc4.slider("Min Score", 0, 100, 0, 5)
 
         filtered = df.copy()
         if sel_sector != "All":
@@ -741,170 +840,40 @@ with tab_ratings:
             filtered = filtered[filtered["Type"] == sel_type]
         if sel_region != "All":
             filtered = filtered[filtered["Region"] == sel_region]
+        filtered = filtered[filtered["Score"] >= min_score]
 
-        st.write(f"**{len(filtered)} assets**")
+        with st.expander("Sector Score Chart", expanded=False):
+            sector_avg = df.groupby("Sector")["Score"].mean().sort_values(ascending=False).reset_index()
+            fig = px.bar(sector_avg, x="Sector", y="Score", color="Score",
+                         color_continuous_scale="RdYlGn", range_color=[40, 70])
+            fig.update_layout(height=320, margin=dict(t=10, b=40),
+                              plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
+            st.plotly_chart(fig, width="stretch")
 
-        display_df = filtered.head(300)[["Ticker", "Grade", "Score", "Sector", "Type", "Region"]].copy()
-        display_df.index = range(1, len(display_df) + 1)
-        st.dataframe(
-            display_df,
-            width="stretch",
-            column_config={
-                "Score": st.column_config.ProgressColumn("Score", min_value=0, max_value=100, format="%d"),
-                "Grade": st.column_config.TextColumn("Grade"),
-            },
-            height=500,
-        )
-
-        # Sector score chart
+        st.markdown(f"**{len(filtered)} assets** — click any row to expand analysis")
+        st.caption("Sub-scores: Earnings 25% · Insider 20% · Macro 15% · Geo 15% · Fundamentals 15% · Options 5% · WSB/Short 5%")
         st.divider()
-        st.subheader("Average Score by Sector")
-        sector_avg = df.groupby("Sector")["Score"].mean().sort_values(ascending=False).reset_index()
-        fig = px.bar(sector_avg, x="Sector", y="Score", color="Score",
-                     color_continuous_scale="RdYlGn", range_color=[40, 70])
-        fig.update_layout(height=350, margin=dict(t=20, b=40))
-        st.plotly_chart(fig, width="stretch")
 
-# ═══════════════════════════════════════════════════════
-# TAB 2 — DEEP DIVE
-# ═══════════════════════════════════════════════════════
-with tab_deep:
-    fast_scores = signals.get("fast_scores", {})
-    DEEP_THRESHOLD = 60
-    top_tickers = sorted(
-        [(t, v) for t, v in fast_scores.items() if v.get("score", 0) >= DEEP_THRESHOLD],
-        key=lambda x: x[1]["score"], reverse=True
-    )
-
-    if not top_tickers:
-        st.info(f"No assets scored ≥{DEEP_THRESHOLD}. Run full collect_all.py (not --fast).")
-    else:
-        st.markdown(
-            f"**{len(top_tickers)} assets** scored ≥{DEEP_THRESHOLD} — detailed signal analysis below."
-        )
-        st.caption("Sub-scores weighted: Earnings 25% · Insider 20% · Macro 15% · Geo 15% · Fundamentals 15% · Options 5% · WSB/Short 5%")
-
-        for ticker, entry in top_tickers:
-            score = entry["score"]
-            grade = entry.get("grade", "?")
-            sector = entry.get("sector", "")
-            asset_type = entry.get("type", "stock")
-
-            dive = build_deep_dive(ticker, signals)
+        visible = filtered.head(150)
+        for _, row in visible.iterrows():
+            ticker     = row["Ticker"]
+            score      = int(row["Score"])
+            grade      = row["Grade"]
+            sector     = row["Sector"]
+            asset_type = row["Type"]
             company_name = signals.get("fundamentals", {}).get(ticker, {}).get("name", "")
-
             badge_color = GRADE_COLOR.get(grade, "#888")
-            verdict = dive["verdict"]
-            v_color = dive["verdict_color"]
 
-            display_name = f"{ticker}  {company_name}" if company_name and company_name != ticker else ticker
-            header = (
-                f'<span style="font-size:1.15em;font-weight:bold">{ticker}</span>'
-                + (f'&nbsp;<span style="color:#aaa;font-size:0.95em">{company_name}</span>' if company_name and company_name != ticker else "")
-                + f'&nbsp;&nbsp;<span style="background:{badge_color};color:#000;padding:2px 8px;border-radius:3px;font-weight:bold;font-size:0.85em">{grade}</span>'
-                + f'&nbsp;&nbsp;<span style="background:{v_color};color:#fff;padding:2px 10px;border-radius:3px;font-weight:bold;font-size:0.85em">{verdict}</span>'
-                + f'&nbsp;&nbsp;<span style="color:#888;font-size:0.85em">{sector} · {asset_type} · Score {score}/100</span>'
+            label = (
+                f"{ticker}"
+                + (f"  {company_name}" if company_name and company_name != ticker else "")
+                + f"    {grade}    Score {score}    {sector}"
             )
+            with st.expander(label, expanded=False):
+                _render_deep_dive(ticker, score, grade, sector, asset_type, signals)
 
-            with st.expander(f"{ticker}  {company_name}  —  {grade} {verdict}  (score {score})" if company_name else f"{ticker}  —  {grade} {verdict}  (score {score})", expanded=(score >= 65)):
-                st.markdown(header, unsafe_allow_html=True)
-                st.caption(dive["macro_context"])
-                st.divider()
-
-                col_pro, col_con = st.columns(2)
-                with col_pro:
-                    st.markdown("**Pros**")
-                    if dive["pros"]:
-                        for p in dive["pros"]:
-                            st.markdown(f"- {p}")
-                    else:
-                        st.caption("No strong positives identified")
-
-                with col_con:
-                    st.markdown("**Cons**")
-                    if dive["cons"]:
-                        for c in dive["cons"]:
-                            st.markdown(f"- {c}")
-                    else:
-                        st.caption("No major negatives identified")
-
-                st.divider()
-
-                # Sub-score breakdown bar chart
-                sub = dive["sub_scores"]
-                if sub:
-                    st.markdown("**Signal Breakdown**")
-                    sub_labels = {
-                        "earnings": "Earnings (25%)",
-                        "insider": "Insider Flow (20%)",
-                        "macro": "Macro Regime (15%)",
-                        "geo": "Geopolitical (15%)",
-                        "fundamentals": "Fundamentals (15%)",
-                        "options": "Options Flow (5%)",
-                        "wsb_short": "WSB/Short (5%)",
-                    }
-                    sub_df = pd.DataFrame([
-                        {"Signal": sub_labels.get(k, k), "Score": v, "Color": "#27ae60" if v >= 60 else ("#e84118" if v < 40 else "#f39c12")}
-                        for k, v in sub.items()
-                    ])
-                    fig = px.bar(sub_df, x="Score", y="Signal", orientation="h",
-                                 color="Color", color_discrete_map="identity",
-                                 range_x=[0, 100])
-                    fig.add_vline(x=50, line_dash="dash", line_color="#666")
-                    fig.update_layout(height=260, margin=dict(t=10, b=10, l=0, r=20),
-                                      showlegend=False, yaxis_title=None)
-                    st.plotly_chart(fig, width="stretch")
-
-                # Key metrics table
-                fund = dive["fundamentals"]
-                ins = dive["insider"]
-                opt = dive["options"]
-                sht = dive["short"]
-                if any([fund, ins, opt, sht]):
-                    st.markdown("**Key Metrics**")
-                    r1c1, r1c2, r1c3, r1c4 = st.columns(4)
-                    r2c1, r2c2, r2c3, r2c4 = st.columns(4)
-                    r1c1.metric("P/E", f"{fund.get('pe_ratio'):.1f}x" if fund.get("pe_ratio") else "N/A")
-                    r1c2.metric("Rev Growth", f"{fund.get('revenue_growth_yoy'):+.1f}%" if fund.get("revenue_growth_yoy") is not None else "N/A")
-                    r1c3.metric("ROE", f"{fund.get('return_on_equity'):.1f}%" if fund.get("return_on_equity") else "N/A")
-                    r1c4.metric("Analyst", fund.get("analyst_rating", "N/A").title())
-                    upside_val = fund.get("upside_pct")
-                    r2c1.metric("Upside to Target", f"{upside_val:+.1f}%" if upside_val is not None else "N/A",
-                                delta=f"${fund.get('target_price','?')}" if upside_val is not None else None)
-                    r2c2.metric("Put-Call Ratio", f"{opt.get('put_call_ratio'):.2f}" if opt.get("put_call_ratio") else "N/A")
-                    r2c3.metric("Short Float", f"{sht.get('short_float_pct'):.1f}%" if sht.get("short_float_pct") is not None else "N/A")
-                    r2c4.metric("Next Earnings", fund.get("next_earnings", "N/A"))
-
-                # Grouped event analysis
-                rel_groups = dive["relevant_groups"]
-                if rel_groups:
-                    st.divider()
-                    st.markdown("**Event Risk Analysis (Polymarket)**")
-                    for grp in rel_groups:
-                        sector_impact = grp["impact"].get(sector, grp["impact"].get("default", ""))
-                        prob = grp["dominant_prob"]
-                        alert = "HIGH" if prob > 0.4 else ("MED" if prob > 0.15 else "LOW")
-
-                        with st.expander(f"[{alert}] {grp['name']} — {grp['signal_text']}", expanded=True):
-                            if sector_impact:
-                                st.markdown(f"**Impact on {sector}:** {sector_impact}")
-
-                            st.markdown("---")
-                            st.caption("Individual markets:")
-                            for ev in grp["markets"]:
-                                p = ev["probability"]
-                                bar_fill = int(p * 14)
-                                bar = "█" * bar_fill + "░" * (14 - bar_fill)
-                                st.markdown(
-                                    f"`{bar}` **{p:.0%}** {ev['question']}  "
-                                    f"<span style='color:#888;font-size:0.75em'>"
-                                    f"vol ${ev['volume']/1e6:.1f}M · ends {ev.get('end_date','?')[:10]}"
-                                    f"</span>",
-                                    unsafe_allow_html=True,
-                                )
-
-        st.divider()
-        st.caption(f"Threshold: score ≥{DEEP_THRESHOLD}. Scores refresh every 5 min when data/signals.json updates.")
+        if len(filtered) > 150:
+            st.caption(f"Showing 150 of {len(filtered)}. Use filters or raise Min Score to narrow.")
 
 # TAB 3 — MACRO SIGNALS
 # ═══════════════════════════════════════════════════════
