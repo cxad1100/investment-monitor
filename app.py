@@ -435,6 +435,123 @@ def build_deep_dive(ticker: str, signals: dict) -> dict:
         "short": short,
     }
 
+def build_world_summary(signals: dict) -> dict:
+    macro = signals.get("macro", {})
+    btc = signals.get("btc", {})
+    sentiment = signals.get("sentiment", {})
+    groups = group_polymarket_events(signals)
+    news = signals.get("news", {})
+    gdelt = signals.get("gdelt", [])
+
+    interactions = []
+    for grp in groups:
+        gid = grp["id"]
+        prob = grp["dominant_prob"]
+        mkts = grp["markets"]
+
+        if gid == "iran_me" and mkts:
+            war_p = max((m["probability"] for m in mkts if "invade" in m["question"].lower() or "regime" in m["question"].lower()), default=0)
+            deal_p = next((m["probability"] for m in mkts if "deal" in m["question"].lower()), 0)
+            if war_p > 0.1 or deal_p > 0.3:
+                interactions.append({
+                    "icon": "🛢️", "title": f"Iran: war {war_p:.0%} · deal {deal_p:.0%}",
+                    "chains": [
+                        f"War scenario → Hormuz closure → oil +$20-40/bbl → Energy ✅ Airlines ❌ Consumer ❌",
+                        f"Deal scenario → +1-2M bbl/day Iranian supply → oil -$5-10/bbl → Energy ❌ Transport ✅",
+                    ]
+                })
+
+        elif gid == "fomc_next" and mkts:
+            hold_p = next((m["probability"] for m in mkts if "no change" in m["question"].lower()), 0)
+            cut_p = sum(m["probability"] for m in mkts if "decrease" in m["question"].lower())
+            interactions.append({
+                "icon": "🏦", "title": f"Fed June: hold {hold_p:.0%} · cut {cut_p:.0%}",
+                "chains": [
+                    f"Hold → NIM stable for banks ✅ → Growth/REIT discount rate unchanged ❌",
+                    f"Cut → Tech/REIT multiples expand ✅ → Bank NIMs compress ❌",
+                ]
+            })
+
+        elif gid == "fed_annual" and mkts:
+            no_cut_p = next((m["probability"] for m in mkts if "no fed rate cut" in m["question"].lower()), 0)
+            if no_cut_p > 0.5:
+                interactions.append({
+                    "icon": "📅", "title": f"2026 rate path: no cuts {no_cut_p:.0%}",
+                    "chains": [
+                        "Higher-for-longer → Tech/REIT valuation headwind ❌ → Banks stable ✅",
+                        "Prolonged high rates → Consumer credit squeeze → Discretionary ❌ Staples ✅",
+                    ]
+                })
+
+        elif gid == "china_taiwan" and mkts:
+            clash_p = max(mkts, key=lambda m: m["probability"], default={"probability": 0})["probability"] if mkts else 0
+            if clash_p > 0.05:
+                interactions.append({
+                    "icon": "🚢", "title": f"China/Taiwan conflict: {clash_p:.0%}",
+                    "chains": [
+                        "Military clash → TSMC supply shock → Semiconductors ❌ Defense ✅",
+                        "Blockade → China trade decoupling accelerates → Supply chains restructure",
+                    ]
+                })
+
+        elif gid == "bitcoin" and mkts:
+            above_100 = next((m["probability"] for m in mkts if "100,000" in m["question"] and "reach" in m["question"].lower()), 0)
+            dip_55 = next((m["probability"] for m in mkts if "55,000" in m["question"]), 0)
+            interactions.append({
+                "icon": "₿", "title": f"BTC: above $100k {above_100:.0%} · dip <$55k {dip_55:.0%}",
+                "chains": [
+                    f"BTC bull → institutional risk-on confirmed → Growth/Tech ✅ Defensives ❌",
+                    f"BTC crash → risk-off signal → Defensives ✅ High-multiple growth ❌",
+                ]
+            })
+
+        elif gid == "recession" and mkts:
+            rec_p = mkts[0]["probability"] if mkts else 0
+            if rec_p > 0.1:
+                interactions.append({
+                    "icon": "📉", "title": f"US recession risk: {rec_p:.0%}",
+                    "chains": [
+                        "Recession → Cyclicals (Disc, Financials, Materials) -30-50% ❌",
+                        "Recession → Defensives (Staples, Utilities, Healthcare) outperform ✅",
+                    ]
+                })
+
+    headlines = news.get("headlines", []) if isinstance(news, dict) else []
+    theme_kw = {
+        "AI & Tech": ["ai", "artificial intelligence", "nvidia", "chip", "semiconductor", "openai", "deepseek"],
+        "Energy & Commodities": ["oil", "energy", "gas", "crude", "opec", "copper", "gold"],
+        "Fed & Rates": ["fed", "rate", "interest", "inflation", "cpi", "powell"],
+        "Geopolitics": ["iran", "china", "russia", "ukraine", "taiwan", "war", "sanctions"],
+        "Earnings": ["earnings", "revenue", "profit", "beat", "miss", "guidance"],
+        "IPO & M&A": ["ipo", "merger", "acquisition", "buyout", "deal"],
+    }
+    theme_counts = {t: 0 for t in theme_kw}
+    for h in headlines:
+        title_lower = h.get("title", "").lower()
+        for theme, kws in theme_kw.items():
+            if any(k in title_lower for k in kws):
+                theme_counts[theme] += 1
+    news_themes = [(t, c) for t, c in sorted(theme_counts.items(), key=lambda x: -x[1]) if c > 0]
+
+    escalating = [r["region"] for r in gdelt if r.get("trend") == "escalating"]
+
+    return {
+        "regime": macro.get("regime", "unknown"),
+        "risk_level": macro.get("risk_level", "medium"),
+        "btc_regime": btc.get("regime", ""),
+        "fg_score": sentiment.get("fear_greed", {}).get("score"),
+        "fg_rating": sentiment.get("fear_greed", {}).get("rating", ""),
+        "vix": sentiment.get("vix", {}).get("vix"),
+        "vix_regime": sentiment.get("vix", {}).get("regime", ""),
+        "spread_regime": sentiment.get("credit_spreads", {}).get("spread_regime", ""),
+        "interactions": interactions,
+        "news_themes": news_themes[:4],
+        "escalating_regions": escalating,
+        "tailwinds": macro.get("sector_tailwinds", []),
+        "headwinds": macro.get("sector_headwinds", []),
+    }
+
+
 DATA_DIR = Path("data")
 SIGNALS_FILE = DATA_DIR / "signals.json"
 RATINGS_FILE = DATA_DIR / "ratings_report.json"
@@ -508,6 +625,50 @@ if signals is None:
 collected_at = signals.get("collected_at", "unknown")
 st.caption(f"Data collected: {collected_at}  ·  Universe: {signals.get('universe_size', '?')} assets")
 
+# ── World View Summary ────────────────────────────────────────────────────────
+world = build_world_summary(signals)
+
+with st.container():
+    st.markdown("## 🌍 World View")
+
+    m1, m2, m3, m4, m5, m6 = st.columns(6)
+    regime_color = {"growth": "🟢", "inflation": "🟠", "stagflation": "🔴", "recession": "🔴", "deflation": "🔵"}.get(world["regime"], "⚪")
+    m1.metric("Regime", f"{regime_color} {world['regime'].title()}")
+    m2.metric("Risk", world["risk_level"].upper())
+    vix = world.get("vix")
+    m3.metric("VIX", f"{vix:.1f} ({world['vix_regime'].replace('_',' ')})" if vix else "N/A")
+    fg = world.get("fg_score")
+    m4.metric("Fear/Greed", f"{fg:.0f} — {world['fg_rating'].replace('_',' ').title()}" if fg else "N/A")
+    m5.metric("Credit Spreads", world["spread_regime"].title() or "N/A")
+    m6.metric("Liquidity", world["btc_regime"].replace("_", " ").title() or "N/A")
+
+    st.divider()
+
+    col_ev, col_news = st.columns([2, 1])
+
+    with col_ev:
+        st.markdown("**⚡ Key Events & Market Interactions**")
+        for item in world["interactions"]:
+            st.markdown(f"**{item['icon']} {item['title']}**")
+            for chain in item["chains"]:
+                st.markdown(f"&nbsp;&nbsp;&nbsp;`→` {chain}")
+            st.markdown("")
+
+    with col_news:
+        st.markdown("**📰 News Themes This Week**")
+        for theme, count in world["news_themes"]:
+            bar = "█" * min(count, 10) + "░" * (10 - min(count, 10))
+            st.markdown(f"`{bar}` **{theme}** ({count})")
+
+        st.markdown("")
+        st.markdown("**Sector Outlook**")
+        for s in world["tailwinds"][:3]:
+            st.markdown(f"✅ {s}")
+        for s in world["headwinds"][:3]:
+            st.markdown(f"❌ {s}")
+
+    st.divider()
+
 # ── Tabs ─────────────────────────────────────────────────────────────────────
 tab_ratings, tab_deep, tab_signals, tab_events, tab_news = st.tabs(
     ["📈 Ratings", "💡 Deep Dive", "🌐 Macro Signals", "⚡ Events", "📰 News"]
@@ -550,29 +711,17 @@ with tab_ratings:
 
         st.write(f"**{len(filtered)} assets**")
 
-        # Render table with colored grades
-        html_rows = []
-        for _, row in filtered.head(200).iterrows():
-            badge = grade_badge(row["Grade"])
-            html_rows.append(
-                f"<tr><td><b>{row['Ticker']}</b></td>"
-                f"<td>{badge}</td>"
-                f"<td>{row['Score']}</td>"
-                f"<td>{row['Sector']}</td>"
-                f"<td>{row['Type']}</td>"
-                f"<td>{row['Region']}</td></tr>"
-            )
-        table_html = (
-            "<table style='width:100%;border-collapse:collapse'>"
-            "<thead><tr style='border-bottom:1px solid #444'>"
-            "<th align='left'>Ticker</th><th align='left'>Grade</th>"
-            "<th align='left'>Score</th><th align='left'>Sector</th>"
-            "<th align='left'>Type</th><th align='left'>Region</th>"
-            "</tr></thead><tbody>"
-            + "".join(html_rows)
-            + "</tbody></table>"
+        display_df = filtered.head(300)[["Ticker", "Grade", "Score", "Sector", "Type", "Region"]].copy()
+        display_df.index = range(1, len(display_df) + 1)
+        st.dataframe(
+            display_df,
+            width="stretch",
+            column_config={
+                "Score": st.column_config.ProgressColumn("Score", min_value=0, max_value=100, format="%d"),
+                "Grade": st.column_config.TextColumn("Grade"),
+            },
+            height=500,
         )
-        st.markdown(table_html, unsafe_allow_html=True)
 
         # Sector score chart
         st.divider()
@@ -583,7 +732,6 @@ with tab_ratings:
         fig.update_layout(height=350, margin=dict(t=20, b=40))
         st.plotly_chart(fig, width="stretch")
 
-# ═══════════════════════════════════════════════════════
 # ═══════════════════════════════════════════════════════
 # TAB 2 — DEEP DIVE
 # ═══════════════════════════════════════════════════════
@@ -622,7 +770,7 @@ with tab_deep:
                 f'<span style="color:#888;font-size:0.9em">{sector} · {asset_type} · Score {score}/100</span>'
             )
 
-            with st.expander(f"{ticker}  {grade}  {verdict}  —  score {score}  ·  {sector}", expanded=(score >= 65)):
+            with st.expander(f"{ticker} — {grade} {verdict} (score {score})", expanded=(score >= 65)):
                 st.markdown(header, unsafe_allow_html=True)
                 st.caption(dive["macro_context"])
                 st.divider()
@@ -678,17 +826,18 @@ with tab_deep:
                 sht = dive["short"]
                 if any([fund, ins, opt, sht]):
                     st.markdown("**Key Metrics**")
-                    m1, m2, m3, m4, m5, m6, m7, m8 = st.columns(8)
-                    m1.metric("P/E", f"{fund.get('pe_ratio'):.1f}x" if fund.get("pe_ratio") else "N/A")
-                    m2.metric("Rev Growth", f"{fund.get('revenue_growth_yoy'):+.1f}%" if fund.get("revenue_growth_yoy") is not None else "N/A")
-                    m3.metric("ROE", f"{fund.get('return_on_equity'):.1f}%" if fund.get("return_on_equity") else "N/A")
-                    m4.metric("Analyst", fund.get("analyst_rating", "N/A").title())
+                    r1c1, r1c2, r1c3, r1c4 = st.columns(4)
+                    r2c1, r2c2, r2c3, r2c4 = st.columns(4)
+                    r1c1.metric("P/E", f"{fund.get('pe_ratio'):.1f}x" if fund.get("pe_ratio") else "N/A")
+                    r1c2.metric("Rev Growth", f"{fund.get('revenue_growth_yoy'):+.1f}%" if fund.get("revenue_growth_yoy") is not None else "N/A")
+                    r1c3.metric("ROE", f"{fund.get('return_on_equity'):.1f}%" if fund.get("return_on_equity") else "N/A")
+                    r1c4.metric("Analyst", fund.get("analyst_rating", "N/A").title())
                     upside_val = fund.get("upside_pct")
-                    m5.metric("Upside to Target", f"{upside_val:+.1f}%" if upside_val is not None else "N/A",
-                              delta=f"${fund.get('target_price','?')}" if upside_val is not None else None)
-                    m6.metric("Put-Call", f"{opt.get('put_call_ratio'):.2f}" if opt.get("put_call_ratio") else "N/A")
-                    m7.metric("Short Float", f"{sht.get('short_float_pct'):.1f}%" if sht.get("short_float_pct") is not None else "N/A")
-                    m8.metric("Next Earnings", fund.get("next_earnings", "N/A"))
+                    r2c1.metric("Upside to Target", f"{upside_val:+.1f}%" if upside_val is not None else "N/A",
+                                delta=f"${fund.get('target_price','?')}" if upside_val is not None else None)
+                    r2c2.metric("Put-Call Ratio", f"{opt.get('put_call_ratio'):.2f}" if opt.get("put_call_ratio") else "N/A")
+                    r2c3.metric("Short Float", f"{sht.get('short_float_pct'):.1f}%" if sht.get("short_float_pct") is not None else "N/A")
+                    r2c4.metric("Next Earnings", fund.get("next_earnings", "N/A"))
 
                 # Grouped event analysis
                 rel_groups = dive["relevant_groups"]
