@@ -9,13 +9,26 @@ FRED_API_KEY = os.getenv("FRED_API_KEY")
 MODEL = "claude-opus-4-7"
 
 FRED_SERIES = {
-    "FEDFUNDS": "Federal Funds Rate",
-    "CPIAUCSL": "CPI (Inflation)",
-    "T10Y2Y": "10Y-2Y Yield Spread",
-    "UNRATE": "Unemployment Rate",
-    "T10YIE": "10Y Breakeven Inflation",
-    "GDP": "Real GDP Growth",
-    "DGS10": "10-Year Treasury Yield",
+    # Rates & yields
+    "FEDFUNDS":      "Federal Funds Rate",
+    "DGS2":          "2-Year Treasury Yield",
+    "DGS10":         "10-Year Treasury Yield",
+    "T10Y2Y":        "10Y-2Y Yield Spread",
+    "T10YIE":        "10Y Breakeven Inflation",
+    # Inflation
+    "CPIAUCSL":      "CPI (Inflation)",
+    "PPIACO":        "Producer Price Index",
+    # Growth & labour
+    "GDP":           "Real GDP Growth",
+    "INDPRO":        "Industrial Production",
+    "PAYEMS":        "Nonfarm Payrolls",
+    "UNRATE":        "Unemployment Rate",
+    "RSAFS":         "Retail Sales",
+    "HOUST":         "Housing Starts",
+    # Sentiment & credit
+    "UMCSENT":       "Consumer Sentiment",
+    "M2SL":          "M2 Money Supply",
+    "BAMLH0A0HYM2":  "High Yield Credit Spread",
 }
 
 RISK_RULES = {

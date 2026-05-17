@@ -93,6 +93,24 @@ def fetch_fundamentals(tickers: list[str]) -> dict:
                     except Exception:
                         pass
 
+                # Extra valuation ratios
+                beta             = info.get("beta")
+                pb_ratio         = info.get("priceToBook")
+                ps_ratio         = info.get("priceToSalesTrailingTwelveMonths")
+                ev_ebitda        = info.get("enterpriseToEbitda")
+                peg_ratio        = info.get("trailingPegRatio")
+                op_margin        = info.get("operatingMargins")
+                profit_margin    = info.get("profitMargins")
+                gross_margin     = info.get("grossMargins")
+                quick_ratio      = info.get("quickRatio")
+                current_ratio    = info.get("currentRatio")
+                inst_pct         = info.get("institutionPercentHeld")
+                insider_pct      = info.get("heldPercentInsiders")
+                revenue_per_share = info.get("revenuePerShare")
+                book_value       = info.get("bookValue")
+                shares_out       = info.get("sharesOutstanding")
+                float_shares     = info.get("floatShares")
+
                 result[ticker] = {
                     "pe_ratio": round(pe, 2) if pe else None,
                     "eps": round(eps, 4) if eps else None,
@@ -120,6 +138,23 @@ def fetch_fundamentals(tickers: list[str]) -> dict:
                     "forward_eps": round(forward_eps, 4) if forward_eps else None,
                     "next_earnings": next_earnings,
                     "current_price": round(current_price, 2) if current_price else None,
+                    # Extended valuation
+                    "beta": round(beta, 3) if beta else None,
+                    "price_to_book": round(pb_ratio, 2) if pb_ratio else None,
+                    "price_to_sales": round(ps_ratio, 2) if ps_ratio else None,
+                    "ev_to_ebitda": round(ev_ebitda, 2) if ev_ebitda else None,
+                    "peg_ratio": round(peg_ratio, 2) if peg_ratio else None,
+                    "operating_margin": round(op_margin * 100, 2) if op_margin else None,
+                    "profit_margin": round(profit_margin * 100, 2) if profit_margin else None,
+                    "gross_margin": round(gross_margin * 100, 2) if gross_margin else None,
+                    "quick_ratio": round(quick_ratio, 2) if quick_ratio else None,
+                    "current_ratio": round(current_ratio, 2) if current_ratio else None,
+                    "institutional_pct": round(inst_pct * 100, 1) if inst_pct else None,
+                    "insider_pct": round(insider_pct * 100, 2) if insider_pct else None,
+                    "revenue_per_share": round(revenue_per_share, 2) if revenue_per_share else None,
+                    "book_value": round(book_value, 2) if book_value else None,
+                    "shares_outstanding": shares_out,
+                    "float_shares": float_shares,
                 }
             except Exception as e:
                 result[ticker] = {"error": str(e)}

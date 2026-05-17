@@ -3,10 +3,16 @@
 import feedparser
 
 RSS_FEEDS = {
-    "yahoo_finance": "https://finance.yahoo.com/rss/topstories",
-    "marketwatch": "https://feeds.content.dowjones.io/public/rss/mw_topstories",
-    "financial_times": "https://www.ft.com/rss/home",
-    "seeking_alpha": "https://seekingalpha.com/feed.xml",
+    "yahoo_finance":     "https://finance.yahoo.com/rss/topstories",
+    "marketwatch":       "https://feeds.content.dowjones.io/public/rss/mw_topstories",
+    "financial_times":   "https://www.ft.com/rss/home",
+    "seeking_alpha":     "https://seekingalpha.com/feed.xml",
+    "cnbc_top":          "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+    "cnbc_finance":      "https://www.cnbc.com/id/10000664/device/rss/rss.html",
+    "cnbc_earnings":     "https://www.cnbc.com/id/15839135/device/rss/rss.html",
+    "reuters_markets":   "https://feeds.reuters.com/reuters/businessNews",
+    "wsj_markets":       "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
+    "motley_fool":       "https://www.fool.com/feeds/index.aspx",
 }
 
 

@@ -1,7 +1,7 @@
 """
 Master data collection script.
-Runs all 10 collectors in sequence and produces data/signals.json.
-No Claude API required. Runtime: ~10-20 minutes for full universe.
+Runs all 13 collectors in sequence and produces data/signals.json.
+No Claude API required. Runtime: ~20-30 minutes for full universe.
 
 Usage:
   python collect_all.py
@@ -29,6 +29,10 @@ from tools.short_interest_tools import fetch_short_interest
 from tools.wsb_tools import fetch_wsb_posts, analyze_wsb_signals
 from tools.btc_tools import fetch_btc_signal
 from tools.sentiment_tools import fetch_market_sentiment
+from tools.macro_extended_tools import (
+    fetch_bond_yields, fetch_currencies,
+    fetch_sector_etf_performance, fetch_extended_commodities,
+)
 from fast_scorer import score_all_assets
 
 
@@ -124,8 +128,23 @@ def collect(fast: bool = False) -> dict:
     wsb_signal = analyze_wsb_signals(wsb_posts)
     btc_signal = fetch_btc_signal()
 
-    print("[10/10] Market sentiment (VIX, Fear/Greed, credit spreads)...")
+    print("[10/13] Market sentiment (VIX, Fear/Greed, credit spreads)...")
     sentiment = fetch_market_sentiment()
+
+    print("[11/13] Bond yields + yield curve...")
+    bond_yields = fetch_bond_yields()
+    print(f"      {bond_yields.get('summary', 'N/A')}")
+
+    print("[12/13] Currencies + sector ETF performance...")
+    currencies = fetch_currencies()
+    sector_etfs = fetch_sector_etf_performance()
+    leaders = sector_etfs.get("leaders_1m", [])
+    laggards = sector_etfs.get("laggards_1m", [])
+    print(f"      ETF leaders 1M: {', '.join(leaders)} | laggards: {', '.join(laggards)}")
+
+    print("[13/13] Extended commodities (silver, wheat, corn, soybeans)...")
+    commodities_ext = fetch_extended_commodities()
+    print(f"      {len(commodities_ext)} commodity signals collected")
 
     universe_map = build_universe_map(universe)
 
@@ -149,6 +168,10 @@ def collect(fast: bool = False) -> dict:
         "wsb": wsb_signal,
         "btc": btc_signal,
         "sentiment": sentiment,
+        "bond_yields": bond_yields,
+        "currencies": currencies,
+        "sector_etfs": sector_etfs,
+        "commodities_ext": commodities_ext,
         "universe_map": {k: {"sector": v.get("sector", ""), "region": v.get("region", ""),
                              "type": v.get("type", "stock"), "name": v.get("name", "")}
                          for k, v in universe_map.items()},

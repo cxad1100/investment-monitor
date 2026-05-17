@@ -950,9 +950,70 @@ with tab_signals:
                     st.markdown(f"TLT: {tlt.get('price', '?')} ({tlt.get('return_1m_pct', 0):+.1f}% 1M)")
 
     st.divider()
+
+    # ── Bond yields ──────────────────────────────────────────────────────────
+    bonds = signals.get("bond_yields", {})
+    fx = signals.get("currencies", {})
+    etfs = signals.get("sector_etfs", {})
+    comm_ext = signals.get("commodities_ext", {})
+
+    bc1, bc2, bc3, bc4 = st.columns(4)
+    y10 = bonds.get("yields", {}).get("10Y", {})
+    y3m = bonds.get("yields", {}).get("3M", {})
+    curve = bonds.get("curve_10y_3m")
+    curve_r = bonds.get("curve_regime", "unknown")
+    bc1.metric("10Y Yield", f"{y10.get('yield_pct','?')}%", delta=f"{y10.get('change_1m_bp','?')}bp 1M")
+    bc2.metric("3M Yield", f"{y3m.get('yield_pct','?')}%", delta=f"{y3m.get('change_1m_bp','?')}bp 1M")
+    bc3.metric("Yield Curve (10Y-3M)", f"{curve:+.2f}%" if curve else "N/A")
+    bc4.metric("Curve Regime", curve_r.replace("_", " ").title())
+
+    # ── Currencies ───────────────────────────────────────────────────────────
+    st.markdown("**Currencies**")
+    fx_sig = fx.get("_signal", {})
+    if fx_sig:
+        st.caption(f"DXY {fx_sig.get('dxy_level','?')} ({fx_sig.get('dollar_trend','?')}) — {fx_sig.get('implication','')}")
+    fxcols = st.columns(5)
+    for i, (label, sym) in enumerate([("DXY", "DXY"), ("EUR/USD", "EURUSD"), ("USD/JPY", "USDJPY"), ("GBP/USD", "GBPUSD"), ("USD/CNY", "USDCNY")]):
+        d = fx.get(sym, {})
+        fxcols[i].metric(label, f"{d.get('price','?')}", delta=f"{d.get('1M','?')}% 1M" if d.get("1M") is not None else None)
+
+    st.divider()
+
     col_a, col_b = st.columns(2)
 
     with col_a:
+        st.subheader("Sector ETF Performance (1M)")
+        ranked = etfs.get("ranked_1m", [])
+        if ranked:
+            etf_df = pd.DataFrame(ranked, columns=["Sector", "1M Return %"])
+            etf_df["1M Return %"] = etf_df["1M Return %"].round(2)
+            etf_df["ETF"] = etf_df["Sector"].map(
+                lambda s: signals.get("sector_etfs", {}).get("by_sector", {}).get(s, {}).get("ticker", "")
+            )
+            etf_df.index = range(1, len(etf_df) + 1)
+            st.dataframe(etf_df[["ETF", "Sector", "1M Return %"]], width="stretch",
+                         column_config={"1M Return %": st.column_config.NumberColumn(format="%.2f%%")},
+                         height=360)
+
+        st.divider()
+        st.subheader("FRED Indicators")
+        fred = macro.get("fred_indicators", {})
+        for key, info in fred.items():
+            trend_dir = "up" if info.get("trend") == "rising" else ("down" if info.get("trend") == "falling" else "flat")
+            st.metric(
+                label=f"{info.get('name', key)} ({trend_dir})",
+                value=f"{info.get('latest', '?')} {info.get('unit', '')}",
+                delta=f"vs yr ago: {info.get('prev_year', '?')}",
+            )
+
+    with col_b:
+        st.subheader("Extended Commodities")
+        if comm_ext:
+            for name, d in comm_ext.items():
+                ret_1m = d.get("1M")
+                st.metric(name.title(), f"{d.get('price','?')}", delta=f"{ret_1m:+.1f}% 1M" if ret_1m is not None else None)
+
+        st.divider()
         st.subheader("Sector Tailwinds / Headwinds")
         tailwinds = macro.get("sector_tailwinds", [])
         headwinds = macro.get("sector_headwinds", [])
@@ -964,25 +1025,6 @@ with tab_signals:
         st.divider()
         st.subheader("Futures")
         st.caption(macro.get("futures_summary", "No data"))
-
-        st.divider()
-        st.subheader("BTC Signal")
-        st.caption(btc.get("interpretation", "No data"))
-        asset_impacts = btc.get("asset_impacts", {})
-        for asset, signal in asset_impacts.items():
-            direction = "+" if signal == "tailwind" else "-"
-            st.markdown(f"{direction} {asset.replace('_', ' ').title()}: {signal}")
-
-    with col_b:
-        st.subheader("FRED Indicators")
-        fred = macro.get("fred_indicators", {})
-        for key, info in fred.items():
-            trend_dir = "up" if info.get("trend") == "rising" else ("down" if info.get("trend") == "falling" else "flat")
-            st.metric(
-                label=f"{info.get('name', key)} ({trend_dir})",
-                value=f"{info.get('latest', '?')} {info.get('unit', '')}",
-                delta=f"vs yr ago: {info.get('prev_year', '?')}",
-            )
 
         st.divider()
         st.subheader("GDELT Conflict Indices")
