@@ -127,7 +127,7 @@ def _agg_btc(markets: list[dict]) -> tuple[str, float]:
     above_150 = _prob_for("150k") or _prob_for("150,000")
     dip_55    = _prob_for("55,000")
     dip_45    = _prob_for("45,000")
-    parts = [f"above $100k: {above_100:.0%}", f"dip <$55k: {dip_55:.0%}", f"dip <$45k: {dip_45:.0%}"]
+    parts = [f"above 100k: {above_100:.0%}", f"dip below 55k: {dip_55:.0%}", f"dip below 45k: {dip_45:.0%}"]
     return " · ".join(parts), above_100
 
 
@@ -202,21 +202,21 @@ def group_polymarket_events(signals: dict) -> list[dict]:
     rec_m = pick(lambda q: "recession" in q and "by end of" in q)
 
     groups = [
-        _group("fomc_next",     "FOMC Next Meeting",       "🏦", fomc_next_m,
+        _group("fomc_next",     "FOMC Next Meeting",       "", fomc_next_m,
                {"Financials","Information Technology","Utilities","Real Estate","Consumer Discretionary"}, _agg_fomc_next),
-        _group("fed_annual",    "Fed Rate Path 2026",      "📅", fed_annual_m,
+        _group("fed_annual",    "Fed Rate Path 2026",      "", fed_annual_m,
                {"Financials","Information Technology","Utilities","Real Estate","Consumer Discretionary","Consumer Staples"}, _agg_fed_annual),
-        _group("iran_me",       "Iran / Middle East",       "🛢️", iran_m,
+        _group("iran_me",       "Iran / Middle East",       "", iran_m,
                {"Energy","Industrials","Consumer Discretionary","Consumer Staples","Materials"}, _agg_conflict),
-        _group("china_taiwan",  "China / Taiwan",           "🚢", tw_m,
+        _group("china_taiwan",  "China / Taiwan",           "", tw_m,
                {"Information Technology","Industrials","Consumer Discretionary","Materials","Communication Services"}, _agg_conflict),
-        _group("russia_ukraine","Russia / Ukraine / NATO",  "🪖", ru_m,
+        _group("russia_ukraine","Russia / Ukraine / NATO",  "", ru_m,
                {"Energy","Industrials","Materials","Financials"}, _agg_conflict),
-        _group("bitcoin",       "Bitcoin Range",            "₿",  btc_m,
+        _group("bitcoin",       "Bitcoin Range",            "", btc_m,
                {"Information Technology","Financials","Communication Services"}, _agg_btc),
-        _group("ai_tech",       "AI / Tech / IPO Pipeline", "🤖", ai_m,
+        _group("ai_tech",       "AI / Tech / IPO Pipeline", "", ai_m,
                {"Information Technology","Communication Services"}, _agg_generic),
-        _group("recession",     "US Recession Risk",        "📉", rec_m,
+        _group("recession",     "US Recession Risk",        "", rec_m,
                {"Consumer Discretionary","Financials","Industrials","Materials",
                 "Information Technology","Consumer Staples","Utilities","Healthcare"}, _agg_generic),
     ]
@@ -446,79 +446,113 @@ def build_world_summary(signals: dict) -> dict:
     interactions = []
     for grp in groups:
         gid = grp["id"]
-        prob = grp["dominant_prob"]
         mkts = grp["markets"]
+        if not mkts:
+            continue
 
-        if gid == "iran_me" and mkts:
-            war_p = max((m["probability"] for m in mkts if "invade" in m["question"].lower() or "regime" in m["question"].lower()), default=0)
+        if gid == "iran_me":
+            war_p = max((m["probability"] for m in mkts
+                         if "invade" in m["question"].lower() or "regime" in m["question"].lower()), default=0)
             deal_p = next((m["probability"] for m in mkts if "deal" in m["question"].lower()), 0)
             if war_p > 0.1 or deal_p > 0.3:
                 interactions.append({
-                    "icon": "🛢️", "title": f"Iran: war {war_p:.0%} · deal {deal_p:.0%}",
+                    "title": f"Iran — war {war_p:.0%}, nuclear deal {deal_p:.0%}",
                     "chains": [
-                        f"War scenario → Hormuz closure → oil +$20-40/bbl → Energy ✅ Airlines ❌ Consumer ❌",
-                        f"Deal scenario → +1-2M bbl/day Iranian supply → oil -$5-10/bbl → Energy ❌ Transport ✅",
+                        f"War scenario ({war_p:.0%}): A US-Iran conflict would shut the Strait of Hormuz, "
+                        f"which carries ~20% of global seaborne oil. Brent crude would spike USD 20-40/bbl. "
+                        f"Energy producers gain directly on higher realized prices; airlines and consumer-facing "
+                        f"companies face fuel and logistics cost surges that compress margins.",
+                        f"Deal scenario ({deal_p:.0%}): A nuclear agreement re-admits ~1-2M bbl/day of Iranian "
+                        f"supply to markets. This removes the current war risk premium from oil prices, "
+                        f"likely softening crude USD 5-10/bbl. Bearish for oil producers; positive for "
+                        f"transport, airlines, and consumer spending power.",
                     ]
                 })
 
-        elif gid == "fomc_next" and mkts:
+        elif gid == "fomc_next":
             hold_p = next((m["probability"] for m in mkts if "no change" in m["question"].lower()), 0)
             cut_p = sum(m["probability"] for m in mkts if "decrease" in m["question"].lower())
             interactions.append({
-                "icon": "🏦", "title": f"Fed June: hold {hold_p:.0%} · cut {cut_p:.0%}",
+                "title": f"Fed June Meeting — hold {hold_p:.0%}, cut {cut_p:.0%}",
                 "chains": [
-                    f"Hold → NIM stable for banks ✅ → Growth/REIT discount rate unchanged ❌",
-                    f"Cut → Tech/REIT multiples expand ✅ → Bank NIMs compress ❌",
+                    f"Hold ({hold_p:.0%}): The Fed keeps the target rate unchanged. Banks maintain current "
+                    f"net interest margins (NIM) — the spread between deposit costs and lending rates stays "
+                    f"wide, supporting bank profitability. For growth stocks and REITs, the high discount "
+                    f"rate persists, keeping forward earnings and property valuations compressed.",
+                    f"Cut ({cut_p:.0%}): A rate reduction lowers the risk-free rate, mechanically expanding "
+                    f"equity multiples for tech and REITs (each 25bp cut adds ~2-4% to DCF fair values). "
+                    f"Bank NIMs compress immediately as deposit pricing lags lending rate declines.",
                 ]
             })
 
-        elif gid == "fed_annual" and mkts:
+        elif gid == "fed_annual":
             no_cut_p = next((m["probability"] for m in mkts if "no fed rate cut" in m["question"].lower()), 0)
-            if no_cut_p > 0.5:
+            hike_p = next((m["probability"] for m in mkts if "rate hike in 2026" in m["question"].lower()), 0)
+            if no_cut_p > 0.4:
                 interactions.append({
-                    "icon": "📅", "title": f"2026 rate path: no cuts {no_cut_p:.0%}",
+                    "title": f"2026 Rate Path — no cuts {no_cut_p:.0%}, hike risk {hike_p:.0%}",
                     "chains": [
-                        "Higher-for-longer → Tech/REIT valuation headwind ❌ → Banks stable ✅",
-                        "Prolonged high rates → Consumer credit squeeze → Discretionary ❌ Staples ✅",
+                        f"Higher-for-longer ({no_cut_p:.0%} probability): Elevated rates sustain discount "
+                        f"rate pressure on growth stocks and REITs for the full year. Companies with "
+                        f"near-term cash flows outperform those whose value is in distant earnings. "
+                        f"Banks benefit from stable NIMs but face rising credit default risk in H2.",
+                        f"Consumer impact: High mortgage, auto, and credit card rates reduce household "
+                        f"disposable income. Discretionary spending is squeezed while staples demand "
+                        f"holds. Watch consumer delinquency rates as a leading indicator of stress.",
                     ]
                 })
 
-        elif gid == "china_taiwan" and mkts:
-            clash_p = max(mkts, key=lambda m: m["probability"], default={"probability": 0})["probability"] if mkts else 0
-            if clash_p > 0.05:
+        elif gid == "china_taiwan":
+            clash_p = max((m["probability"] for m in mkts), default=0) if mkts else 0
+            if clash_p > 0.04:
                 interactions.append({
-                    "icon": "🚢", "title": f"China/Taiwan conflict: {clash_p:.0%}",
+                    "title": f"China / Taiwan — military conflict {clash_p:.0%}",
                     "chains": [
-                        "Military clash → TSMC supply shock → Semiconductors ❌ Defense ✅",
-                        "Blockade → China trade decoupling accelerates → Supply chains restructure",
+                        f"Taiwan produces ~90% of the world's advanced semiconductors (TSMC). Even a "
+                        f"partial conflict or blockade would create a multi-year supply shock for chips — "
+                        f"worse than the 2021 shortage. NVIDIA, AMD, Apple, AMAT, and LRCX face direct "
+                        f"exposure. Defense contractors benefit from accelerated NATO/US military spending.",
+                        f"Secondary effect: A conflict would trigger broad China decoupling — tariffs, "
+                        f"sanctions, and supply chain restructuring across electronics, industrials, and "
+                        f"consumer goods. The market currently prices this at {clash_p:.0%}, "
+                        f"but the tail impact if it occurs is systemic.",
                     ]
                 })
 
-        elif gid == "bitcoin" and mkts:
-            above_100 = next((m["probability"] for m in mkts if "100,000" in m["question"] and "reach" in m["question"].lower()), 0)
+        elif gid == "bitcoin":
+            above_100 = next((m["probability"] for m in mkts
+                              if "100,000" in m["question"] and "reach" in m["question"].lower()), 0)
             dip_55 = next((m["probability"] for m in mkts if "55,000" in m["question"]), 0)
             interactions.append({
-                "icon": "₿", "title": f"BTC: above $100k {above_100:.0%} · dip <$55k {dip_55:.0%}",
+                "title": f"Bitcoin — above USD 100k: {above_100:.0%}, below USD 55k: {dip_55:.0%}",
                 "chains": [
-                    f"BTC bull → institutional risk-on confirmed → Growth/Tech ✅ Defensives ❌",
-                    f"BTC crash → risk-off signal → Defensives ✅ High-multiple growth ❌",
+                    f"Bitcoin above USD 100k ({above_100:.0%}): Sustained BTC strength signals broad "
+                    f"institutional risk appetite and liquidity. Growth stocks, fintech, and crypto-adjacent "
+                    f"equities benefit. Defensive names (utilities, gold miners) lag in this environment.",
+                    f"Bitcoin below USD 55k ({dip_55:.0%}): A significant BTC decline is historically "
+                    f"correlated with broader risk-off episodes — tightening liquidity, rising credit spreads, "
+                    f"and multiple compression in high-growth equities. Defensives outperform in this scenario.",
                 ]
             })
 
-        elif gid == "recession" and mkts:
+        elif gid == "recession":
             rec_p = mkts[0]["probability"] if mkts else 0
             if rec_p > 0.1:
                 interactions.append({
-                    "icon": "📉", "title": f"US recession risk: {rec_p:.0%}",
+                    "title": f"US Recession — {rec_p:.0%} probability by end of 2026",
                     "chains": [
-                        "Recession → Cyclicals (Disc, Financials, Materials) -30-50% ❌",
-                        "Recession → Defensives (Staples, Utilities, Healthcare) outperform ✅",
+                        f"Cyclical exposure ({rec_p:.0%} risk): Consumer Discretionary, Financials, and "
+                        f"Materials historically fall 30-50% peak-to-trough in recessions. Capex freezes "
+                        f"early, loan losses surge, and commodity demand collapses with industrial production.",
+                        f"Defensive positioning: Consumer Staples, Utilities, and Healthcare are structurally "
+                        f"insulated — demand for food, electricity, and healthcare is inelastic regardless "
+                        f"of economic cycle. These sectors typically outperform cyclicals by 20-40% in recessions.",
                     ]
                 })
 
     headlines = news.get("headlines", []) if isinstance(news, dict) else []
     theme_kw = {
-        "AI & Tech": ["ai", "artificial intelligence", "nvidia", "chip", "semiconductor", "openai", "deepseek"],
+        "AI & Technology": ["ai", "artificial intelligence", "nvidia", "chip", "semiconductor", "openai", "deepseek"],
         "Energy & Commodities": ["oil", "energy", "gas", "crude", "opec", "copper", "gold"],
         "Fed & Rates": ["fed", "rate", "interest", "inflation", "cpi", "powell"],
         "Geopolitics": ["iran", "china", "russia", "ukraine", "taiwan", "war", "sanctions"],
@@ -609,11 +643,11 @@ def scores_to_df(fast_scores: dict) -> pd.DataFrame:
 # ── Page config ─────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="TR Investment Ratings",
-    page_icon="📊",
+    page_icon=None,
     layout="wide",
     initial_sidebar_state="collapsed",
 )
-st.title("📊 Trade Republic — Weekly Investment Ratings")
+st.title("Trade Republic — Weekly Investment Ratings")
 
 signals = load_signals()
 ratings = load_ratings()
@@ -629,49 +663,48 @@ st.caption(f"Data collected: {collected_at}  ·  Universe: {signals.get('univers
 world = build_world_summary(signals)
 
 with st.container():
-    st.markdown("## 🌍 World View")
+    st.markdown("## World View")
 
     m1, m2, m3, m4, m5, m6 = st.columns(6)
-    regime_color = {"growth": "🟢", "inflation": "🟠", "stagflation": "🔴", "recession": "🔴", "deflation": "🔵"}.get(world["regime"], "⚪")
-    m1.metric("Regime", f"{regime_color} {world['regime'].title()}")
-    m2.metric("Risk", world["risk_level"].upper())
+    m1.metric("Macro Regime", world["regime"].title())
+    m2.metric("Risk Level", world["risk_level"].upper())
     vix = world.get("vix")
-    m3.metric("VIX", f"{vix:.1f} ({world['vix_regime'].replace('_',' ')})" if vix else "N/A")
+    m3.metric("VIX", f"{vix:.1f}  {world['vix_regime'].replace('_',' ')}" if vix else "N/A")
     fg = world.get("fg_score")
-    m4.metric("Fear/Greed", f"{fg:.0f} — {world['fg_rating'].replace('_',' ').title()}" if fg else "N/A")
+    m4.metric("Fear / Greed", f"{fg:.0f}  {world['fg_rating'].replace('_',' ').title()}" if fg else "N/A")
     m5.metric("Credit Spreads", world["spread_regime"].title() or "N/A")
-    m6.metric("Liquidity", world["btc_regime"].replace("_", " ").title() or "N/A")
+    m6.metric("Liquidity Signal", world["btc_regime"].replace("_", " ").title() or "N/A")
 
     st.divider()
 
-    col_ev, col_news = st.columns([2, 1])
+    col_ev, col_news = st.columns([3, 1])
 
     with col_ev:
-        st.markdown("**⚡ Key Events & Market Interactions**")
+        st.markdown("#### Key Events and Market Interactions")
         for item in world["interactions"]:
-            st.markdown(f"**{item['icon']} {item['title']}**")
+            st.markdown(f"**{item['title']}**")
             for chain in item["chains"]:
-                st.markdown(f"&nbsp;&nbsp;&nbsp;`→` {chain}")
-            st.markdown("")
+                st.markdown(chain)
+            st.markdown("---")
 
     with col_news:
-        st.markdown("**📰 News Themes This Week**")
+        st.markdown("#### News Themes")
         for theme, count in world["news_themes"]:
-            bar = "█" * min(count, 10) + "░" * (10 - min(count, 10))
-            st.markdown(f"`{bar}` **{theme}** ({count})")
+            bar = "█" * min(count, 8) + "░" * (8 - min(count, 8))
+            st.markdown(f"`{bar}` {theme} ({count})")
 
         st.markdown("")
-        st.markdown("**Sector Outlook**")
-        for s in world["tailwinds"][:3]:
-            st.markdown(f"✅ {s}")
-        for s in world["headwinds"][:3]:
-            st.markdown(f"❌ {s}")
+        st.markdown("#### Sector Outlook")
+        for s in world["tailwinds"][:4]:
+            st.markdown(f"+ {s}")
+        for s in world["headwinds"][:4]:
+            st.markdown(f"- {s}")
 
     st.divider()
 
 # ── Tabs ─────────────────────────────────────────────────────────────────────
 tab_ratings, tab_deep, tab_signals, tab_events, tab_news = st.tabs(
-    ["📈 Ratings", "💡 Deep Dive", "🌐 Macro Signals", "⚡ Events", "📰 News"]
+    ["Ratings", "Deep Dive", "Macro Signals", "Events", "News"]
 )
 
 # ═══════════════════════════════════════════════════════
@@ -758,26 +791,29 @@ with tab_deep:
             asset_type = entry.get("type", "stock")
 
             dive = build_deep_dive(ticker, signals)
+            company_name = signals.get("fundamentals", {}).get(ticker, {}).get("name", "")
 
             badge_color = GRADE_COLOR.get(grade, "#888")
             verdict = dive["verdict"]
             v_color = dive["verdict_color"]
 
+            display_name = f"{ticker}  {company_name}" if company_name and company_name != ticker else ticker
             header = (
-                f'<span style="font-size:1.15em;font-weight:bold">{ticker}</span>&nbsp;&nbsp;'
-                f'<span style="background:{badge_color};color:#000;padding:2px 8px;border-radius:4px;font-weight:bold;font-size:0.85em">{grade}</span>&nbsp;&nbsp;'
-                f'<span style="background:{v_color};color:#fff;padding:2px 10px;border-radius:4px;font-weight:bold;font-size:0.85em">{verdict}</span>&nbsp;&nbsp;'
-                f'<span style="color:#888;font-size:0.9em">{sector} · {asset_type} · Score {score}/100</span>'
+                f'<span style="font-size:1.15em;font-weight:bold">{ticker}</span>'
+                + (f'&nbsp;<span style="color:#aaa;font-size:0.95em">{company_name}</span>' if company_name and company_name != ticker else "")
+                + f'&nbsp;&nbsp;<span style="background:{badge_color};color:#000;padding:2px 8px;border-radius:3px;font-weight:bold;font-size:0.85em">{grade}</span>'
+                + f'&nbsp;&nbsp;<span style="background:{v_color};color:#fff;padding:2px 10px;border-radius:3px;font-weight:bold;font-size:0.85em">{verdict}</span>'
+                + f'&nbsp;&nbsp;<span style="color:#888;font-size:0.85em">{sector} · {asset_type} · Score {score}/100</span>'
             )
 
-            with st.expander(f"{ticker} — {grade} {verdict} (score {score})", expanded=(score >= 65)):
+            with st.expander(f"{ticker}  {company_name}  —  {grade} {verdict}  (score {score})" if company_name else f"{ticker}  —  {grade} {verdict}  (score {score})", expanded=(score >= 65)):
                 st.markdown(header, unsafe_allow_html=True)
                 st.caption(dive["macro_context"])
                 st.divider()
 
                 col_pro, col_con = st.columns(2)
                 with col_pro:
-                    st.markdown("**✅ Pros**")
+                    st.markdown("**Pros**")
                     if dive["pros"]:
                         for p in dive["pros"]:
                             st.markdown(f"- {p}")
@@ -785,7 +821,7 @@ with tab_deep:
                         st.caption("No strong positives identified")
 
                 with col_con:
-                    st.markdown("**❌ Cons**")
+                    st.markdown("**Cons**")
                     if dive["cons"]:
                         for c in dive["cons"]:
                             st.markdown(f"- {c}")
@@ -847,9 +883,9 @@ with tab_deep:
                     for grp in rel_groups:
                         sector_impact = grp["impact"].get(sector, grp["impact"].get("default", ""))
                         prob = grp["dominant_prob"]
-                        alert = "🔴" if prob > 0.4 else ("🟡" if prob > 0.15 else "🟢")
+                        alert = "HIGH" if prob > 0.4 else ("MED" if prob > 0.15 else "LOW")
 
-                        with st.expander(f"{grp['icon']} {alert} **{grp['name']}** — {grp['signal_text']}", expanded=True):
+                        with st.expander(f"[{alert}] {grp['name']} — {grp['signal_text']}", expanded=True):
                             if sector_impact:
                                 st.markdown(f"**Impact on {sector}:** {sector_impact}")
 
@@ -897,7 +933,7 @@ with tab_signals:
               delta=f"{fg_score - fg_prev:+.1f}" if fg_score and fg_prev else None)
 
     if vix_data or fg_data or spreads:
-        with st.expander("📊 Market Sentiment Detail", expanded=False):
+        with st.expander("Market Sentiment Detail", expanded=False):
             s1, s2, s3 = st.columns(3)
             with s1:
                 st.markdown("**VIX (Volatility)**")
@@ -917,8 +953,8 @@ with tab_signals:
                 st.markdown("**Credit Spreads (HYG/LQD)**")
                 spread_r = spreads.get("spread_regime", "?")
                 spread_c = spreads.get("spread_change_1m")
-                color = "🔴" if spread_r == "widening" else ("🟢" if spread_r == "tightening" else "🟡")
-                st.markdown(f"{color} Spreads: **{spread_r}** ({spread_c:+.2f}% 1M)" if spread_c is not None else f"Regime: {spread_r}")
+                spread_label = "HIGH" if spread_r == "widening" else ("LOW" if spread_r == "tightening" else "STABLE")
+                st.markdown(f"Spreads: **{spread_r.upper()}** ({spread_c:+.2f}% 1M)" if spread_c is not None else f"Regime: {spread_r}")
                 hyg = spreads.get("hyg", {})
                 lqd = spreads.get("lqd", {})
                 tlt = spreads.get("tlt", {})
@@ -937,9 +973,9 @@ with tab_signals:
         tailwinds = macro.get("sector_tailwinds", [])
         headwinds = macro.get("sector_headwinds", [])
         for s in tailwinds:
-            st.markdown(f"✅ **{s}**")
+            st.markdown(f"+ {s}")
         for s in headwinds:
-            st.markdown(f"❌ **{s}**")
+            st.markdown(f"- {s}")
 
         st.divider()
         st.subheader("Futures")
@@ -950,16 +986,16 @@ with tab_signals:
         st.caption(btc.get("interpretation", "No data"))
         asset_impacts = btc.get("asset_impacts", {})
         for asset, signal in asset_impacts.items():
-            icon = "✅" if signal == "tailwind" else "❌"
-            st.markdown(f"{icon} {asset.replace('_', ' ').title()}: *{signal}*")
+            direction = "+" if signal == "tailwind" else "-"
+            st.markdown(f"{direction} {asset.replace('_', ' ').title()}: {signal}")
 
     with col_b:
         st.subheader("FRED Indicators")
         fred = macro.get("fred_indicators", {})
         for key, info in fred.items():
-            trend_icon = "📈" if info.get("trend") == "rising" else ("📉" if info.get("trend") == "falling" else "➡️")
+            trend_dir = "up" if info.get("trend") == "rising" else ("down" if info.get("trend") == "falling" else "flat")
             st.metric(
-                label=f"{trend_icon} {info.get('name', key)}",
+                label=f"{info.get('name', key)} ({trend_dir})",
                 value=f"{info.get('latest', '?')} {info.get('unit', '')}",
                 delta=f"vs yr ago: {info.get('prev_year', '?')}",
             )
@@ -970,9 +1006,9 @@ with tab_signals:
         for region in gdelt:
             score = region.get("conflict_score", 0)
             trend = region.get("trend", "unknown")
-            trend_icon = "🔴" if trend == "escalating" else ("🟢" if trend == "de-escalating" else "🟡")
+            trend_label = "ESCALATING" if trend == "escalating" else ("DE-ESCALATING" if trend == "de-escalating" else "STABLE")
             bar = "█" * int(score * 10) + "░" * (10 - int(score * 10))
-            st.markdown(f"{trend_icon} **{region['region']}** `{bar}` {score:.2f} — *{trend}*")
+            st.markdown(f"**{region['region']}** `{bar}` {score:.2f} — {trend_label}")
 
 # ═══════════════════════════════════════════════════════
 # TAB 3 — EVENTS (Polymarket)
@@ -987,9 +1023,9 @@ with tab_events:
         all_groups = group_polymarket_events(signals)
         for grp in all_groups:
             prob = grp["dominant_prob"]
-            alert = "🔴" if prob > 0.4 else ("🟡" if prob > 0.15 else "🟢")
+            alert = "HIGH" if prob > 0.4 else ("MED" if prob > 0.15 else "LOW")
             with st.expander(
-                f"{grp['icon']} {alert} **{grp['name']}** — {grp['signal_text']}",
+                f"[{alert}] {grp['name']} — {grp['signal_text']}",
                 expanded=prob > 0.2,
             ):
                 default_impact = grp["impact"].get("default", "")
