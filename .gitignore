@@ -1,4 +1,5 @@
 .venv/
 .env
+input/
 data/collect.log
 __pycache__/

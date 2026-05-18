@@ -593,6 +593,7 @@ def build_world_summary(signals: dict) -> dict:
 
 
 DATA_DIR       = Path("data")
+INPUT_DIR      = Path("input")
 SIGNALS_FILE   = DATA_DIR / "signals.json"
 RATINGS_FILE   = DATA_DIR / "ratings_report.json"
 ANALYTICS_FILE = DATA_DIR / "portfolio_analytics_cache.json"
@@ -841,7 +842,7 @@ tab_portfolio, tab_research = st.tabs(["Portfolio", "Research"])
 @st.cache_data(ttl=60)  # transactions only — fast, no network
 def load_portfolio_transactions():
     from tools.portfolio_tools import parse_portfolio
-    portfolio_path = DATA_DIR / "portfolio.csv"
+    portfolio_path = INPUT_DIR / "portfolio.csv"
     if not portfolio_path.exists():
         return None
     return parse_portfolio(portfolio_path)
@@ -851,7 +852,7 @@ def load_portfolio_transactions():
 def fetch_live_summary():
     """Fetch current prices for open positions and compute live P&L."""
     from tools.portfolio_tools import parse_portfolio, fetch_current_prices, compute_portfolio_summary
-    portfolio_path = DATA_DIR / "portfolio.csv"
+    portfolio_path = INPUT_DIR / "portfolio.csv"
     if not portfolio_path.exists():
         return None, None
     portfolio = parse_portfolio(portfolio_path)
@@ -1214,7 +1215,7 @@ data.forEach(s=>{{
 with tab_portfolio:
     portfolio = load_portfolio_transactions()
     if portfolio is None:
-        st.info("No portfolio.csv found in data/")
+        st.info("No portfolio.csv found in input/")
     else:
         _live_portfolio()
 

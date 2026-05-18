@@ -1,7 +1,10 @@
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+# Load from input/.env (personal data folder), fall back to root .env
+_env_path = Path(__file__).parent / "input" / ".env"
+load_dotenv(_env_path if _env_path.exists() else Path(__file__).parent / ".env")
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 FRED_API_KEY = os.getenv("FRED_API_KEY")

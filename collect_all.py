@@ -252,7 +252,7 @@ def collect(fast: bool = False) -> dict:
     print(f"\n[collect_all] Saved {out_path}")
 
     # ── Pre-compute portfolio analytics (saves dashboard load time) ───────────
-    portfolio_path = Path("data/portfolio.csv")
+    portfolio_path = Path("input/portfolio.csv")
     analytics_path = Path("data/portfolio_analytics_cache.json")
 
     # In fast mode skip if cache is less than 6 hours old
