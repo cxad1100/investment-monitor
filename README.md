@@ -1,6 +1,6 @@
 # Monitor
 
-Investment dashboard for Trade Republic portfolios. Collects signals from 13 sources, scores every asset, and serves a live Streamlit dashboard.
+Investment dashboard. Collects signals from 13 sources, scores every asset, and serves a live Streamlit dashboard.
 
 ## Setup
 
@@ -16,7 +16,7 @@ Create `input/.env`:
 FRED_API_KEY=your_key    # free at fred.stlouisfed.org
 ```
 
-Optionally add `input/portfolio.csv` (Trade Republic CSV export):
+Optionally add `input/portfolio.csv` with your trade history:
 ```
 Date,Ticker,Action,Shares,Price,PricePerShare
 2024-11-18,ASML.AS,buy,0.25,160.30,641.20
