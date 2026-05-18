@@ -110,8 +110,13 @@ def collect(fast: bool = False) -> dict:
     poly_geo     = poly_data["geo"]
     poly_macro   = poly_data["macro"]
     poly_company = poly_data["company"]
+    poly_alpha   = poly_data.get("alpha", [])
     all_poly     = poly_geo + poly_macro + poly_company
+    conv_bull = sum(1 for m in poly_alpha if m["alpha_signal"] == "conviction_bull")
+    conv_bear = sum(1 for m in poly_alpha if m["alpha_signal"] == "conviction_bear")
+    uncertain = sum(1 for m in poly_alpha if m["alpha_signal"] == "uncertainty_alpha")
     print(f"       {len(poly_geo)} geo · {len(poly_macro)} macro · {len(poly_company)} company markets")
+    print(f"       Alpha signals: {conv_bull} conviction-bull · {conv_bear} conviction-bear · {uncertain} uncertain")
 
     # ── 5. GDELT ─────────────────────────────────────────────────────────────
     print("[5/13] GDELT regional conflict indices...")
@@ -152,9 +157,12 @@ def collect(fast: bool = False) -> dict:
 
     # ── 9. WSB + BTC ─────────────────────────────────────────────────────────
     print("[9/13] WSB Reddit + BTC signal...")
-    wsb_posts  = fetch_wsb_posts()
+    wsb_posts  = fetch_wsb_posts(fetch_comment_depth=not fast)
     wsb_signal = analyze_wsb_signals(wsb_posts)
     btc_signal = fetch_btc_signal()
+    dd_count   = len(wsb_signal.get("dd_posts", []))
+    opt_count  = len(wsb_signal.get("options_flow_tickers", []))
+    print(f"       {wsb_signal.get('total_posts_analyzed',0)} posts · {dd_count} DD · {opt_count} options-flow tickers")
 
     # ── 10. Market sentiment ─────────────────────────────────────────────────
     print("[10/13] Market sentiment (VIX, Fear/Greed, credit spreads)...")
@@ -209,6 +217,7 @@ def collect(fast: bool = False) -> dict:
         "polymarket_geo":  poly_geo,
         "polymarket_macro": poly_macro,
         "polymarket_company": poly_company,
+        "polymarket_alpha":  poly_alpha,
         "gdelt":           gdelt_data,
         "news":            news_data,
         "price_data":      price_data,

@@ -1,13 +1,16 @@
 """Polymarket Gamma API — prediction market signals for investment analysis.
 
-Four independent fetchers, each targeting a distinct signal category:
-  - fetch_geo_conflict_markets()   geopolitical / military risk
-  - fetch_macro_markets()          Fed policy, recession, inflation
-  - fetch_company_markets()        stock-specific (market cap, IPOs, AI)
-  - fetch_all_investment_markets() combined deduplicated set
+Alpha extraction strategy:
+  - Volume-weighted signal: high volume = real money, more reliable
+  - Urgency: markets resolving in <30 days carry immediate positional impact
+  - Conviction zones: prob >75% or <25% = market has strong view = actionable
+  - Uncertainty zones: prob 35-65% = genuine disagreement = hedging value
+  - Spread tightness: (bestBid close to bestAsk) = liquid, confident market
+  - Probability extremes vs uncertainty = two distinct types of alpha
 """
 
 import re
+from datetime import datetime, timezone
 import requests
 
 POLYMARKET_BASE = "https://gamma-api.polymarket.com"
@@ -114,15 +117,69 @@ def _is_noise(question: str) -> bool:
     return any(p in q for p in EXCLUDE_PHRASES)
 
 
+def _days_to_resolution(end_date_str: str) -> float | None:
+    """Return days until market resolves, or None if unparseable."""
+    if not end_date_str:
+        return None
+    try:
+        end = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
+        now = datetime.now(timezone.utc)
+        delta = (end - now).total_seconds() / 86400
+        return round(delta, 1) if delta > 0 else None
+    except Exception:
+        return None
+
+
+def _alpha_signal(prob: float, volume: float, days: float | None) -> str:
+    """
+    Classify market alpha type:
+    - conviction_bull: prob >75%, high vol → market expects YES strongly
+    - conviction_bear: prob <25%, high vol → market expects NO strongly
+    - uncertainty_alpha: prob 35-65%, high vol, resolving soon → genuine debate
+    - watch: moderate signal
+    - noise: low volume or far-future
+    """
+    if volume < 50_000:
+        return "noise"
+    urgent = days is not None and days <= 30
+    high_vol = volume >= 500_000
+    if prob >= 0.75 and high_vol:
+        return "conviction_bull"
+    if prob <= 0.25 and high_vol:
+        return "conviction_bear"
+    if 0.35 <= prob <= 0.65 and urgent and volume >= 200_000:
+        return "uncertainty_alpha"
+    if prob >= 0.65 or prob <= 0.35:
+        return "watch"
+    return "low_signal"
+
+
 def _to_md(m: dict, category: str = "") -> dict:
+    prob = parse_probability(m)
+    volume = float(m.get("volume", 0) or 0)
+    end_date = m.get("endDate", "")
+    days = _days_to_resolution(end_date)
+
+    best_bid = None
+    best_ask = None
+    try:
+        best_bid = float(m.get("bestBid") or 0) or None
+        best_ask = float(m.get("bestAsk") or 0) or None
+    except Exception:
+        pass
+    spread = round(best_ask - best_bid, 4) if best_bid and best_ask else None
+
     return {
-        "id": m.get("id", ""),
-        "question": m.get("question", ""),
-        "probability": parse_probability(m),
-        "volume": float(m.get("volume", 0) or 0),
-        "end_date": m.get("endDate", ""),
-        "category": category,
-        "source": "polymarket",
+        "id":          m.get("id", ""),
+        "question":    m.get("question", ""),
+        "probability": prob,
+        "volume":      volume,
+        "end_date":    end_date,
+        "days_to_resolution": days,
+        "spread":      spread,
+        "alpha_signal": _alpha_signal(prob, volume, days),
+        "category":    category,
+        "source":      "polymarket",
     }
 
 
@@ -218,10 +275,20 @@ def fetch_all_investment_markets() -> dict:
             company.append(md)
             seen.add(mid)
 
+    # Alpha markets: high-value signals across all categories
+    all_markets = geo + macro + company
+    alpha_order = {"conviction_bull": 0, "conviction_bear": 1,
+                   "uncertainty_alpha": 2, "watch": 3, "low_signal": 4, "noise": 5}
+    alpha_markets = sorted(
+        [m for m in all_markets if m["alpha_signal"] not in ("noise", "low_signal")],
+        key=lambda x: (alpha_order.get(x["alpha_signal"], 9), -x["volume"])
+    )[:20]
+
     return {
         "geo": sorted(geo, key=lambda x: x["volume"], reverse=True)[:40],
         "macro": sorted(macro, key=lambda x: x["volume"], reverse=True)[:50],
         "company": sorted(company, key=lambda x: x["volume"], reverse=True)[:30],
+        "alpha": alpha_markets,
     }
 
 
