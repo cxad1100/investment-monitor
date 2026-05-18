@@ -13,8 +13,15 @@ import json
 import sys
 import time
 import numpy as np
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
+
+from rich.console import Console
+from rich.live import Live
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
 
 from config import FRED_API_KEY
 from tools.universe_manager import refresh_universe, load_universe
@@ -39,37 +46,119 @@ from tools.macro_extended_tools import (
 )
 from fast_scorer import score_all_assets
 
-_T0 = time.time()
+
+# ── Live terminal tracker ─────────────────────────────────────────────────────
+
+ALL_STEPS = [
+    "1/13  Universe",
+    "2/13  FRED Macro",
+    "3/13  Commodity Futures",
+    "4/13  Polymarket",
+    "5/13  GDELT",
+    "6/13  News RSS",
+    "7/13  Price + Fundamentals",
+    "8/13  Insider / Options / Short",
+    "9/13  Reddit WSB + BTC",
+    "10/13 Sentiment",
+    "11/13 Bond Yields",
+    "12/13 Currencies + ETFs",
+    "13/13 Commodities",
+    " *    Bridge + Themes",
+    " *    Scoring",
+    " *    Portfolio",
+]
+_SPIN = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
 
-def _elapsed() -> str:
-    return f"{time.time() - _T0:5.1f}s"
+class Tracker:
+    def __init__(self, fast: bool):
+        self.fast   = fast
+        self._t0    = time.time()
+        self._st    = time.time()   # step start
+        self._frame = 0
+        self._idx   = -1
+        # per-step state: (status, summary, elapsed)
+        self._steps: list[tuple[str, str, float]] = []
+        self.activity = ""          # sub-activity shown at bottom
+
+    # ── public api ──────────────────────────────────────────────────────────
+
+    def start(self, activity: str = "") -> None:
+        self._idx += 1
+        self._st = time.time()
+        self.activity = activity
+        self._steps.append(("running", "", 0.0))
+
+    def update(self, activity: str) -> None:
+        self.activity = activity
+        if self._steps:
+            s, sm, _ = self._steps[-1]
+            self._steps[-1] = (s, sm, round(time.time() - self._st, 1))
+
+    def done(self, summary: str = "") -> None:
+        elapsed = round(time.time() - self._st, 1)
+        self._steps[-1] = ("done", summary, elapsed)
+        self.activity = ""
+
+    def fail(self, summary: str = "") -> None:
+        elapsed = round(time.time() - self._st, 1)
+        self._steps[-1] = ("fail", summary, elapsed)
+        self.activity = ""
+
+    # ── renderer ─────────────────────────────────────────────────────────────
+
+    def render(self) -> Panel:
+        self._frame = (self._frame + 1) % len(_SPIN)
+        spin = _SPIN[self._frame]
+
+        total_elapsed = int(time.time() - self._t0)
+        mm, ss = divmod(total_elapsed, 60)
+        mode = "FAST" if self.fast else "FULL"
+        title = f"[bold]MONITOR · SIGNAL COLLECTION[/bold]  [{mode}]  ⏱ {mm:02d}:{ss:02d}"
+
+        grid = Table.grid(padding=(0, 1))
+        grid.add_column(width=2,  no_wrap=True)   # icon
+        grid.add_column(width=22, no_wrap=True)   # step name
+        grid.add_column(width=42, no_wrap=True)   # summary / activity
+        grid.add_column(width=7,  no_wrap=True, justify="right")  # elapsed
+
+        for i, step_name in enumerate(ALL_STEPS):
+            if i < len(self._steps):
+                status, summary, elapsed = self._steps[i]
+                if status == "done":
+                    icon    = Text("✓", style="bold green")
+                    name_t  = Text(step_name, style="dim white")
+                    sum_t   = Text(summary[:42], style="dim")
+                    ela_t   = Text(f"{elapsed}s", style="dim")
+                elif status == "running":
+                    icon    = Text(spin, style="bold yellow")
+                    name_t  = Text(step_name, style="bold yellow")
+                    act     = self.activity[:42]
+                    sum_t   = Text(act, style="yellow")
+                    ela_t   = Text(f"{elapsed:.1f}s", style="yellow")
+                else:  # fail
+                    icon    = Text("✗", style="bold red")
+                    name_t  = Text(step_name, style="red")
+                    sum_t   = Text(summary[:42], style="red dim")
+                    ela_t   = Text(f"{elapsed}s", style="red dim")
+            elif i == len(self._steps):  # next up (highlighted)
+                icon   = Text("›", style="bright_black")
+                name_t = Text(step_name, style="bright_black")
+                sum_t  = Text("waiting...", style="bright_black")
+                ela_t  = Text("")
+            else:
+                icon   = Text("○", style="bright_black")
+                name_t = Text(step_name, style="bright_black")
+                sum_t  = Text("")
+                ela_t  = Text("")
+
+            grid.add_row(icon, name_t, sum_t, ela_t)
+
+        return Panel(grid, title=title, border_style="bright_black",
+                     subtitle=f"[dim]{self.activity[:70]}[/dim]" if self.activity else "")
 
 
-def _hdr(n: str, title: str) -> None:
-    print(f"\n{'─'*55}")
-    print(f"  [{n}] {title}")
-    print(f"{'─'*55}")
-
-
-def _ok(msg: str) -> None:
-    print(f"  ✓  {msg}")
-
-
-def _warn(msg: str) -> None:
-    print(f"  ⚠  {msg}")
-
-
-def _stat(label: str, val, total=None, unit: str = "") -> None:
-    if total:
-        pct = val / total * 100 if total > 0 else 0
-        bar_len = 20
-        filled = int(pct / 100 * bar_len)
-        bar = "█" * filled + "░" * (bar_len - filled)
-        print(f"  {label:<28} {val:>5}/{total:<5} [{bar}] {pct:5.1f}%{' '+unit if unit else ''}")
-    else:
-        print(f"  {label:<28} {val}{' '+unit if unit else ''}")
-
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def build_universe_map(universe: list[dict]) -> dict:
     return {row["yf_ticker"]: row for row in universe}
@@ -86,7 +175,7 @@ def build_earnings_catalog(fundamentals: dict, poly_markets: list[dict]) -> dict
     for market in poly_markets:
         q = market["question"].upper()
         for ticker in catalog:
-            if ticker in q or ticker.replace(".DE", "").replace(".PA", "").replace(".L", "") in q:
+            if ticker in q or ticker.replace(".DE","").replace(".PA","").replace(".L","") in q:
                 catalog[ticker]["beat_probability"] = market["probability"]
                 catalog[ticker]["polymarket_question"] = market["question"]
     return catalog
@@ -95,10 +184,12 @@ def build_earnings_catalog(fundamentals: dict, poly_markets: list[dict]) -> dict
 def compute_price_stats(price_data: dict) -> dict:
     returns = [v.get("return_1y", 0) for v in price_data.values() if "error" not in v]
     return {
-        "avg_return_1y": round(float(np.mean(returns)), 2) if returns else 0.0,
+        "avg_return_1y":    round(float(np.mean(returns)),   2) if returns else 0.0,
         "median_return_1y": round(float(np.median(returns)), 2) if returns else 0.0,
     }
 
+
+# ── Main collection ───────────────────────────────────────────────────────────
 
 def collect(fast: bool = False) -> dict:
     if not FRED_API_KEY or FRED_API_KEY == "your_fred_api_key_here":
@@ -106,441 +197,349 @@ def collect(fast: bool = False) -> dict:
         sys.exit(1)
 
     Path("data").mkdir(exist_ok=True)
-    mode = "FAST (50 tickers)" if fast else "FULL"
-    print(f"\n{'═'*55}")
-    print(f"  SIGNAL COLLECTION  [{mode}]  {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    print(f"{'═'*55}")
+    console = Console()
+    trk = Tracker(fast)
 
-    # ── 1. Universe ──────────────────────────────────────────────────────────
-    _hdr("1/13", "Universe")
-    t = time.time()
-    refresh_universe(validate=not fast)
-    universe = load_universe()
-    universe_map = build_universe_map(universe)
-    tickers = [row["yf_ticker"] for row in universe]
-    from collections import Counter
-    regions = Counter(r.get("region", "?") for r in universe)
-    types   = Counter(r.get("type", "stock") for r in universe)
-    sectors = Counter(r.get("sector", "?") for r in universe if r.get("sector"))
-    _stat("Total assets", len(tickers))
-    _stat("Stocks", types.get("stock", 0), len(tickers))
-    _stat("ETFs", types.get("etf", 0), len(tickers))
-    top_regions = ", ".join(f"{k}:{v}" for k, v in regions.most_common(5))
-    _ok(f"Regions: {top_regions}")
-    top_sectors = ", ".join(f"{k[:12]}:{v}" for k, v in sectors.most_common(5))
-    _ok(f"Top sectors: {top_sectors}")
-    print(f"  ⏱  {time.time()-t:.1f}s")
+    with Live(trk.render(), console=console, refresh_per_second=10,
+              vertical_overflow="visible") as live:
 
-    # ── 2. FRED macro ────────────────────────────────────────────────────────
-    _hdr("2/13", "FRED Macro Indicators")
-    t = time.time()
-    fred_data = fetch_fred_series()
-    macro_regime = classify_regime(fred_data)
-    ok_fred  = sum(1 for v in fred_data.values() if v is not None and "error" not in str(v))
-    _stat("FRED series fetched", ok_fred, len(fred_data))
-    _ok(f"Regime: {macro_regime.get('regime','?').upper()}  |  Risk: {macro_regime.get('risk_level','?')}")
-    for key, label in [("FEDFUNDS","Fed Rate"),("CPIAUCSL","CPI"),("T10Y2Y","Yield Spread"),("UNRATE","Unemployment")]:
-        val = fred_data.get(key)
-        if val is not None:
-            _ok(f"{label}: {round(float(val),2) if isinstance(val,(int,float)) else val}")
-    macro_signal = {
-        "regime": macro_regime.get("regime", "growth"),
-        "risk_level": macro_regime.get("risk_level", "medium"),
-        "sector_tailwinds": list(set()),
-        "sector_headwinds": list(set()),
-        "futures_summary": "",
-        "fred_indicators": fred_data,
-    }
-    print(f"  ⏱  {time.time()-t:.1f}s")
+        def _refresh(activity: str = "") -> None:
+            if activity:
+                trk.update(activity)
+            live.update(trk.render())
 
-    # ── 3. Commodity futures ─────────────────────────────────────────────────
-    _hdr("3/13", "Commodity Futures")
-    t = time.time()
-    futures_signal = fetch_futures_signal()
-    macro_signal["sector_tailwinds"] = list(set(futures_signal.get("sector_tailwinds", [])))
-    macro_signal["sector_headwinds"] = list(set(futures_signal.get("sector_headwinds", [])))
-    macro_signal["futures_summary"]  = futures_signal.get("summary", "")
-    for item in futures_signal.get("signals", []):
-        direction = "↑" if item.get("direction") == "bullish" else "↓"
-        _ok(f"{direction} {item.get('commodity','?'):12} {item.get('price','?')}")
-    tw = macro_signal["sector_tailwinds"]
-    hw = macro_signal["sector_headwinds"]
-    if tw: _ok(f"Tailwinds: {', '.join(tw)}")
-    if hw: _warn(f"Headwinds: {', '.join(hw)}")
-    print(f"  ⏱  {time.time()-t:.1f}s")
+        # ── 1. Universe ──────────────────────────────────────────────────
+        trk.start("loading universe CSV...")
+        _refresh()
+        refresh_universe(validate=not fast)
+        _refresh("parsing assets...")
+        universe     = load_universe()
+        universe_map = build_universe_map(universe)
+        tickers      = [row["yf_ticker"] for row in universe]
+        regions  = Counter(r.get("region","?") for r in universe)
+        top_r    = " ".join(f"{k}:{v}" for k,v in regions.most_common(4))
+        trk.done(f"{len(tickers)} assets · {top_r}")
+        _refresh()
 
-    # ── 4. Polymarket ────────────────────────────────────────────────────────
-    _hdr("4/13", "Polymarket Prediction Markets")
-    t = time.time()
-    poly_data = fetch_all_investment_markets()
-    poly_geo      = poly_data["geo"]
-    poly_rates    = poly_data.get("rates", [])
-    poly_economy  = poly_data.get("economy", [])
-    poly_indices  = poly_data.get("indices", [])
-    poly_earnings = poly_data.get("earnings", [])
-    poly_stocks   = poly_data.get("stocks", [])
-    poly_alpha    = poly_data.get("alpha", [])
-    poly_macro    = poly_data.get("macro", [])   # legacy
-    poly_company  = poly_data.get("company", []) # legacy
-    all_poly      = poly_geo + poly_rates + poly_economy + poly_indices + poly_earnings + poly_stocks
-    total_markets = len(all_poly)
-    _stat("Total markets fetched", total_markets)
-    _stat("  Geo",             len(poly_geo))
-    _stat("  Rates (CB)",      len(poly_rates))
-    _stat("  Economy",         len(poly_economy))
-    _stat("  Indices",         len(poly_indices))
-    _stat("  Earnings",        len(poly_earnings))
-    _stat("  Stocks",          len(poly_stocks))
-    conv_bull = [m for m in poly_alpha if m["alpha_signal"] == "conviction_bull"]
-    conv_bear = [m for m in poly_alpha if m["alpha_signal"] == "conviction_bear"]
-    uncertain = [m for m in poly_alpha if m["alpha_signal"] == "uncertainty_alpha"]
-    _stat("Alpha: conviction-bull",  len(conv_bull))
-    _stat("Alpha: conviction-bear",  len(conv_bear))
-    _stat("Alpha: uncertainty",      len(uncertain))
-    for m in conv_bull[:2]:
-        _ok(f"  ↑ {m['question'][:65]}  ({m['probability']:.0%})")
-    for m in conv_bear[:2]:
-        _warn(f" ↓ {m['question'][:65]}  ({m['probability']:.0%})")
-    for m in uncertain[:2]:
-        _ok(f"  ? {m['question'][:60]}  ({m['probability']:.0%}, {m.get('days_to_resolution','?')}d)")
-    if poly_earnings:
-        _ok(f"Top earnings market: {poly_earnings[0]['question'][:65]}  ({poly_earnings[0]['probability']:.0%})")
-    print(f"  ⏱  {time.time()-t:.1f}s")
+        # ── 2. FRED macro ────────────────────────────────────────────────
+        trk.start("fetching FRED series...")
+        _refresh()
+        fred_data    = fetch_fred_series()
+        _refresh("classifying regime...")
+        macro_regime = classify_regime(fred_data)
+        ok_fred = sum(1 for v in fred_data.values() if v is not None)
+        regime  = macro_regime.get("regime","?").upper()
+        risk    = macro_regime.get("risk_level","?")
+        macro_signal = {
+            "regime": macro_regime.get("regime","growth"),
+            "risk_level": risk,
+            "sector_tailwinds": [],
+            "sector_headwinds": [],
+            "futures_summary": "",
+            "fred_indicators": fred_data,
+        }
+        trk.done(f"{ok_fred}/16 series · regime={regime} · risk={risk}")
+        _refresh()
 
-    # ── 5. GDELT ─────────────────────────────────────────────────────────────
-    _hdr("5/13", "GDELT Conflict Indices")
-    t = time.time()
-    gdelt_data = fetch_regional_conflict_indices()
-    ok_gdelt = sum(1 for v in gdelt_data.values() if isinstance(v, dict) and "error" not in v)
-    _stat("Regions fetched", ok_gdelt, len(gdelt_data))
-    for region, data in sorted(gdelt_data.items(), key=lambda x: -(x[1].get("conflict_index",0) if isinstance(x[1],dict) else 0))[:5]:
-        idx = data.get("conflict_index", 0) if isinstance(data, dict) else 0
-        bar = "█" * int(idx / 10) + "░" * (10 - int(idx / 10))
-        _ok(f"{region:<20} [{bar}] {idx:.0f}/100")
-    print(f"  ⏱  {time.time()-t:.1f}s")
+        # ── 3. Commodity futures ─────────────────────────────────────────
+        trk.start("fetching futures prices...")
+        _refresh()
+        futures_signal = fetch_futures_signal()
+        macro_signal["sector_tailwinds"] = list(set(futures_signal.get("sector_tailwinds",[])))
+        macro_signal["sector_headwinds"] = list(set(futures_signal.get("sector_headwinds",[])))
+        macro_signal["futures_summary"]  = futures_signal.get("summary","")
+        tw = ", ".join(macro_signal["sector_tailwinds"]) or "none"
+        hw = ", ".join(macro_signal["sector_headwinds"]) or "none"
+        trk.done(f"↑ {tw}  ↓ {hw}")
+        _refresh()
 
-    # ── 6. News ──────────────────────────────────────────────────────────────
-    _hdr("6/13", "News RSS Headlines")
-    t = time.time()
-    news_data = fetch_news_headlines()
-    headlines = news_data.get("headlines", [])
-    from collections import Counter as _C
-    by_source = _C(h["source"] for h in headlines)
-    total_feeds = len(RSS_FEEDS)
-    ok_feeds = len(by_source)
-    _stat("Feeds responding", ok_feeds, total_feeds)
-    _stat("Total headlines",  len(headlines))
-    for src, cnt in by_source.most_common(8):
-        bar = "█" * min(cnt, 20) + "░" * max(0, 20 - cnt)
-        print(f"    {src:<24} {cnt:>3} [{bar}]")
-    print(f"  ⏱  {time.time()-t:.1f}s")
+        # ── 4. Polymarket ────────────────────────────────────────────────
+        trk.start("paginating markets (up to 5000)...")
+        _refresh()
+        poly_data     = fetch_all_investment_markets()
+        poly_geo      = poly_data["geo"]
+        poly_rates    = poly_data.get("rates",[])
+        poly_economy  = poly_data.get("economy",[])
+        poly_indices  = poly_data.get("indices",[])
+        poly_earnings = poly_data.get("earnings",[])
+        poly_stocks   = poly_data.get("stocks",[])
+        poly_alpha    = poly_data.get("alpha",[])
+        poly_macro    = poly_data.get("macro",[])
+        poly_company  = poly_data.get("company",[])
+        all_poly      = poly_geo + poly_rates + poly_economy + poly_indices + poly_earnings + poly_stocks
+        cb  = sum(1 for m in poly_alpha if m["alpha_signal"]=="conviction_bull")
+        cbr = sum(1 for m in poly_alpha if m["alpha_signal"]=="conviction_bear")
+        unc = sum(1 for m in poly_alpha if m["alpha_signal"]=="uncertainty_alpha")
+        trk.done(
+            f"{len(all_poly)} mkts · earn={len(poly_earnings)} "
+            f"idx={len(poly_indices)} bull={cb} bear={cbr} unc={unc}"
+        )
+        _refresh()
 
-    # ── 7. Price history + fundamentals ─────────────────────────────────────
-    _hdr("7/13", "Price History + Fundamentals")
-    t = time.time()
-    PRIORITY = [
-        "NVDA", "AMZN", "GOOGL", "TSM", "TSCO.L",
-        "ISP.MI", "UCG.MI", "WBD.MI", "ASML.AS", "IWDA.AS",
-    ]
-    if fast:
-        priority_set   = [t2 for t2 in PRIORITY if t2 in tickers]
-        remaining      = [t2 for t2 in tickers if t2 not in priority_set]
-        sample_tickers = priority_set + remaining[: max(0, 50 - len(priority_set))]
-    else:
-        sample_tickers = tickers
-    _stat("Tickers to fetch", len(sample_tickers))
-    price_data   = fetch_price_history(sample_tickers, period="1y")
-    fundamentals = fetch_fundamentals(sample_tickers)
-    ok_price = sum(1 for v in price_data.values() if "error" not in v)
-    ok_fund  = len(fundamentals)
-    has_pe   = sum(1 for v in fundamentals.values() if v.get("pe_ratio"))
-    has_analyst = sum(1 for v in fundamentals.values() if v.get("analyst_score") is not None)
-    _stat("Price data OK",   ok_price,    len(sample_tickers))
-    _stat("Fundamentals OK", ok_fund,     len(sample_tickers))
-    _stat("Has P/E ratio",   has_pe,      ok_fund)
-    _stat("Has analyst rating", has_analyst, ok_fund)
-    price_stats = compute_price_stats(price_data)
-    _ok(f"Avg 1Y return: {price_stats['avg_return_1y']:+.1f}%  |  Median: {price_stats['median_return_1y']:+.1f}%")
-    earnings_catalog = build_earnings_catalog(fundamentals, all_poly)
-    print(f"  ⏱  {time.time()-t:.1f}s")
+        # ── 5. GDELT ─────────────────────────────────────────────────────
+        trk.start("fetching conflict indices...")
+        _refresh()
+        gdelt_data = fetch_regional_conflict_indices()
+        ok_g = sum(1 for v in gdelt_data.values() if isinstance(v,dict) and "error" not in v)
+        top_conflict = sorted(
+            [(k, v.get("conflict_index",0)) for k,v in gdelt_data.items() if isinstance(v,dict)],
+            key=lambda x: -x[1]
+        )[:2]
+        top_str = " ".join(f"{k}:{v:.0f}" for k,v in top_conflict)
+        trk.done(f"{ok_g}/{len(gdelt_data)} regions · hot: {top_str}")
+        _refresh()
 
-    # ── 8. Insider / options / short interest ────────────────────────────────
-    _hdr("8/13", "Insider Flow · Options · Short Interest")
-    t = time.time()
-    rated_tickers = list({t2 for t2 in sample_tickers if t2 in price_data and t2 in fundamentals})[:200]
-    _stat("Tickers rated", len(rated_tickers))
-    insider_data = fetch_insider_transactions(rated_tickers)
-    options_data = fetch_options_signal(rated_tickers)
-    short_data   = fetch_short_interest(rated_tickers)
-    ok_insider = sum(1 for v in insider_data.values() if v.get("net_buy_pct_mktcap", 0) != 0)
-    ok_options = sum(1 for v in options_data.values() if v.get("put_call_ratio") is not None)
-    ok_short   = sum(1 for v in short_data.values() if v.get("short_float_pct", 0) > 0)
-    net_buyers  = sum(1 for v in insider_data.values() if v.get("net_buy_pct_mktcap", 0) > 0)
-    net_sellers = sum(1 for v in insider_data.values() if v.get("net_buy_pct_mktcap", 0) < 0)
-    high_short  = sum(1 for v in short_data.values() if v.get("short_float_pct", 0) > 10)
-    _stat("Insider data",   ok_insider, len(rated_tickers))
-    _stat("  Net buyers",   net_buyers,  max(ok_insider,1))
-    _stat("  Net sellers",  net_sellers, max(ok_insider,1))
-    _stat("Options data",   ok_options, len(rated_tickers))
-    _stat("Short interest", ok_short,   len(rated_tickers))
-    _stat("  Short >10%",   high_short, max(ok_short,1))
-    print(f"  ⏱  {time.time()-t:.1f}s")
+        # ── 6. News ──────────────────────────────────────────────────────
+        trk.start(f"fetching {len(RSS_FEEDS)} RSS feeds + SEC 8-K...")
+        _refresh()
+        news_data  = fetch_news_headlines()
+        headlines  = news_data.get("headlines",[])
+        from collections import Counter as _C
+        by_src = _C(h["source"] for h in headlines)
+        trk.done(f"{len(headlines)} headlines · {len(by_src)}/{len(RSS_FEEDS)+1} feeds OK")
+        _refresh()
 
-    # ── 9. WSB + BTC ─────────────────────────────────────────────────────────
-    _hdr("9/13", "Reddit Retail Sentiment + BTC")
-    t = time.time()
-    wsb_posts  = fetch_wsb_posts(fetch_comment_depth=not fast)
-    wsb_signal = analyze_wsb_signals(wsb_posts)
-    btc_signal = fetch_btc_signal()
-    total_posts  = wsb_signal.get("total_posts_analyzed", 0)
-    dd_posts_out = wsb_signal.get("dd_posts", [])
-    opt_tickers  = wsb_signal.get("options_flow_tickers", [])
-    squeeze_cand = wsb_signal.get("squeeze_candidates", [])
-    trending     = wsb_signal.get("trending_tickers", [])
-    subreddits   = wsb_signal.get("subreddits", [])
-    _stat("Subreddits scraped", len(subreddits), len(SUBREDDIT_URLS))
-    _stat("Posts analyzed",     total_posts)
-    _stat("DD/Analysis posts",  len(dd_posts_out))
-    _stat("Options-flow tickers", len(opt_tickers))
-    _stat("Squeeze candidates",   len(squeeze_cand))
-    if trending:
-        top5 = [f"{t2['ticker']}({t2['mentions_7d']:.0f})" for t2 in trending[:5]]
-        _ok(f"Top tickers: {', '.join(top5)}")
-    if dd_posts_out:
-        _ok(f"Top DD: \"{dd_posts_out[0]['title'][:55]}\"  score={dd_posts_out[0]['score']}")
-    if squeeze_cand:
-        _ok(f"Squeeze watch: {', '.join(squeeze_cand[:5])}")
-    btc_price = btc_signal.get("price_usd", "?")
-    btc_trend = btc_signal.get("trend", "?")
-    _ok(f"BTC: ${btc_price:,.0f}  trend={btc_trend}" if isinstance(btc_price, (int,float)) else f"BTC: {btc_price}  trend={btc_trend}")
-    print(f"  ⏱  {time.time()-t:.1f}s")
+        # ── 7. Price history + fundamentals ──────────────────────────────
+        PRIORITY = ["NVDA","AMZN","GOOGL","TSM","TSCO.L","ISP.MI","UCG.MI","WBD.MI","ASML.AS","IWDA.AS"]
+        if fast:
+            prio_set       = [t for t in PRIORITY if t in tickers]
+            sample_tickers = prio_set + [t for t in tickers if t not in prio_set][:max(0,50-len(prio_set))]
+        else:
+            sample_tickers = tickers
 
-    # ── 10. Market sentiment ─────────────────────────────────────────────────
-    _hdr("10/13", "Market Sentiment")
-    t = time.time()
-    sentiment = fetch_market_sentiment()
-    vix_val   = sentiment.get("vix", {}).get("vix", "?")
-    fg_score  = sentiment.get("fear_greed", {}).get("score", "?")
-    fg_rating = sentiment.get("fear_greed", {}).get("rating", "?")
-    hy_spread = sentiment.get("credit_spreads", {}).get("hy_spread", "?")
-    _ok(f"VIX:            {vix_val}")
-    _ok(f"Fear/Greed:     {fg_score} — {fg_rating}")
-    _ok(f"HY Credit Spread: {hy_spread}")
-    print(f"  ⏱  {time.time()-t:.1f}s")
+        trk.start(f"downloading prices for {len(sample_tickers)} tickers...")
+        _refresh()
+        price_data = fetch_price_history(sample_tickers, period="1y")
+        _refresh(f"fetching fundamentals ({len(sample_tickers)} tickers)...")
+        fundamentals     = fetch_fundamentals(sample_tickers)
+        price_stats      = compute_price_stats(price_data)
+        earnings_catalog = build_earnings_catalog(fundamentals, all_poly)
+        ok_p = sum(1 for v in price_data.values() if "error" not in v)
+        ok_f = len(fundamentals)
+        has_a = sum(1 for v in fundamentals.values() if v.get("analyst_score") is not None)
+        avg_r = price_stats["avg_return_1y"]
+        trk.done(
+            f"price {ok_p}/{len(sample_tickers)} "
+            f"fund {ok_f}/{len(sample_tickers)} "
+            f"analyst {has_a}/{ok_f} "
+            f"avg1Y={avg_r:+.1f}%"
+        )
+        _refresh()
 
-    # ── 11. Bond yields + yield curve ────────────────────────────────────────
-    _hdr("11/13", "Bond Yields + Yield Curve")
-    t = time.time()
-    bond_yields = fetch_bond_yields()
-    _ok(f"Summary: {bond_yields.get('summary','N/A')}")
-    for tenor, key in [("3M","3m"), ("2Y","2y"), ("10Y","10y"), ("30Y","30y")]:
-        d = bond_yields.get(key, {})
-        if isinstance(d, dict) and d.get("yield_pct"):
-            chg = d.get("change_1m_bp","?")
-            _ok(f"{tenor} yield: {d['yield_pct']}%  ({chg:+}bp 1M)" if isinstance(chg, (int,float)) else f"{tenor} yield: {d['yield_pct']}%")
-    print(f"  ⏱  {time.time()-t:.1f}s")
+        # ── 8. Insider / options / short ──────────────────────────────────
+        rated_tickers = list({t for t in sample_tickers if t in price_data and t in fundamentals})[:200]
+        trk.start(f"insider flow for {len(rated_tickers)} tickers...")
+        _refresh()
+        insider_data = fetch_insider_transactions(rated_tickers)
+        _refresh(f"options flow ({len(rated_tickers)} tickers)...")
+        options_data = fetch_options_signal(rated_tickers)
+        _refresh(f"short interest ({len(rated_tickers)} tickers)...")
+        short_data   = fetch_short_interest(rated_tickers)
+        ok_i  = sum(1 for v in insider_data.values() if v.get("net_buy_pct_mktcap",0)!=0)
+        buyers = sum(1 for v in insider_data.values() if v.get("net_buy_pct_mktcap",0)>0)
+        ok_o  = sum(1 for v in options_data.values() if v.get("put_call_ratio") is not None)
+        hi_sh = sum(1 for v in short_data.values() if v.get("short_float_pct",0)>10)
+        trk.done(f"insider {ok_i} ({buyers}↑) · options {ok_o} · short>10% {hi_sh}")
+        _refresh()
 
-    # ── 12. Currencies + sector ETFs ─────────────────────────────────────────
-    _hdr("12/13", "Currencies + Sector ETFs")
-    t = time.time()
-    currencies  = fetch_currencies()
-    sector_etfs = fetch_sector_etf_performance()
-    ok_fx = sum(1 for v in currencies.values() if isinstance(v,dict) and v.get("price"))
-    _stat("FX pairs fetched", ok_fx, len(currencies))
-    for pair, data in list(currencies.items())[:6]:
-        if isinstance(data, dict) and data.get("price"):
-            chg = data.get("1M", "?")
-            _ok(f"{pair:<10} {data['price']}  1M={chg:+.1f}%" if isinstance(chg,(int,float)) else f"{pair:<10} {data['price']}")
-    leaders  = sector_etfs.get("leaders_1m", [])
-    laggards = sector_etfs.get("laggards_1m", [])
-    _ok(f"ETF leaders 1M:  {', '.join(leaders[:4])}")
-    _warn(f"ETF laggards 1M: {', '.join(laggards[:4])}")
-    print(f"  ⏱  {time.time()-t:.1f}s")
+        # ── 9. WSB + BTC ──────────────────────────────────────────────────
+        sub_count = len(SUBREDDIT_URLS)
+        trk.start(f"scraping {sub_count} subreddits...")
+        _refresh()
+        wsb_posts  = fetch_wsb_posts(fetch_comment_depth=not fast)
+        _refresh("analysing mentions, sentiment, DD posts...")
+        wsb_signal = analyze_wsb_signals(wsb_posts)
+        _refresh("fetching BTC signal...")
+        btc_signal  = fetch_btc_signal()
+        tot_posts   = wsb_signal.get("total_posts_analyzed",0)
+        dd_ct       = len(wsb_signal.get("dd_posts",[]))
+        opt_ct      = len(wsb_signal.get("options_flow_tickers",[]))
+        sq_ct       = len(wsb_signal.get("squeeze_candidates",[]))
+        trending    = wsb_signal.get("trending_tickers",[])
+        top5        = " ".join(t["ticker"] for t in trending[:5])
+        btc_px      = btc_signal.get("price_usd","?")
+        btc_px_str  = f"${btc_px:,.0f}" if isinstance(btc_px,(int,float)) else str(btc_px)
+        trk.done(
+            f"{tot_posts} posts · DD={dd_ct} opt={opt_ct} sq={sq_ct} "
+            f"top: {top5} · BTC {btc_px_str}"
+        )
+        _refresh()
 
-    # ── 13. Extended commodities ─────────────────────────────────────────────
-    _hdr("13/13", "Extended Commodities")
-    t = time.time()
-    commodities_ext = fetch_extended_commodities()
-    ok_comm = sum(1 for v in commodities_ext.values() if isinstance(v,dict) and v.get("price"))
-    _stat("Commodity signals", ok_comm, len(commodities_ext))
-    for name, data in list(commodities_ext.items())[:8]:
-        if isinstance(data, dict) and data.get("price"):
-            chg = data.get("1M","?")
-            direction = "↑" if isinstance(chg,(int,float)) and chg > 0 else ("↓" if isinstance(chg,(int,float)) and chg < 0 else " ")
-            _ok(f"{direction} {name:<20} {data['price']}  1M={chg:+.1f}%" if isinstance(chg,(int,float)) else f"  {name:<20} {data['price']}")
-    print(f"  ⏱  {time.time()-t:.1f}s")
+        # ── 10. Sentiment ─────────────────────────────────────────────────
+        trk.start("VIX · Fear/Greed · credit spreads...")
+        _refresh()
+        sentiment  = fetch_market_sentiment()
+        vix_val    = sentiment.get("vix",{}).get("vix","?")
+        fg_score   = sentiment.get("fear_greed",{}).get("score","?")
+        fg_rating  = sentiment.get("fear_greed",{}).get("rating","?")
+        trk.done(f"VIX {vix_val} · F/G {fg_score} ({fg_rating})")
+        _refresh()
 
-    # ── Post-processing ──────────────────────────────────────────────────────
-    _hdr("POST", "Post-Processing")
-    t = time.time()
-    print("  → News-market bridge...")
-    news_market_summary = build_news_market_summary(headlines, all_poly)
-    _stat("Markets with news support", news_market_summary['coverage_pct'], 100, "%")
+        # ── 11. Bond yields ───────────────────────────────────────────────
+        trk.start("fetching yields (2Y/10Y/30Y)...")
+        _refresh()
+        bond_yields = fetch_bond_yields()
+        trk.done(bond_yields.get("summary","N/A"))
+        _refresh()
 
-    print("  → Retail trend (WSB)...")
-    retail_trend = compute_retail_trend(wsb_signal, universe_map, short_data)
-    _ok(f"{retail_trend['trend_direction'].upper()} — {retail_trend['narrative'][:80]}")
+        # ── 12. Currencies + sector ETFs ──────────────────────────────────
+        trk.start("FX rates + sector ETF performance...")
+        _refresh()
+        currencies  = fetch_currencies()
+        _refresh("sector ETF 1M performance...")
+        sector_etfs = fetch_sector_etf_performance()
+        ok_fx    = sum(1 for v in currencies.values() if isinstance(v,dict) and v.get("price"))
+        leaders  = sector_etfs.get("leaders_1m",[])[:3]
+        laggards = sector_etfs.get("laggards_1m",[])[:3]
+        trk.done(f"{ok_fx} FX pairs · ↑{','.join(leaders)} ↓{','.join(laggards)}")
+        _refresh()
 
-    # ── Build signals dict ───────────────────────────────────────────────────
-    signals = {
-        "collected_at":       datetime.now().isoformat(),
-        "universe_size":      len(tickers),
-        "rated_ticker_count": len(rated_tickers),
-        "universe_map": {
-            k: {
-                "sector": v.get("sector", ""),
-                "region": v.get("region", ""),
-                "type":   v.get("type", "stock"),
-                "name":   v.get("name", ""),
-            }
-            for k, v in universe_map.items()
-        },
-        "macro":              macro_signal,
-        "polymarket_geo":      poly_geo,
-        "polymarket_rates":    poly_rates,
-        "polymarket_economy":  poly_economy,
-        "polymarket_indices":  poly_indices,
-        "polymarket_earnings": poly_earnings,
-        "polymarket_stocks":   poly_stocks,
-        "polymarket_alpha":    poly_alpha,
-        "polymarket_macro":    poly_macro,
-        "polymarket_company":  poly_company,
-        "gdelt":              gdelt_data,
-        "news":               news_data,
-        "price_data":         price_data,
-        "price_stats":        price_stats,
-        "fundamentals":       fundamentals,
-        "earnings":           earnings_catalog,
-        "insider":            insider_data,
-        "options":            options_data,
-        "short_interest":     short_data,
-        "wsb":                wsb_signal,
-        "btc":                btc_signal,
-        "sentiment":          sentiment,
-        "bond_yields":        bond_yields,
-        "currencies":         currencies,
-        "sector_etfs":        sector_etfs,
-        "commodities_ext":    commodities_ext,
-        "news_market_bridge": news_market_summary,
-        "retail_trend":       retail_trend,
-        "events":             [],
-        "themes":             [],
-    }
+        # ── 13. Extended commodities ──────────────────────────────────────
+        trk.start("fetching extended commodity signals...")
+        _refresh()
+        commodities_ext = fetch_extended_commodities()
+        ok_c = sum(1 for v in commodities_ext.values() if isinstance(v,dict) and v.get("price"))
+        trk.done(f"{ok_c}/{len(commodities_ext)} commodity signals")
+        _refresh()
 
-    print("  → Scoring cross-source themes...")
-    themes = score_themes(signals)
-    signals["themes"] = themes
-    _stat("Themes detected", len(themes))
-    for th in themes[:5]:
-        _ok(f"{th['label']:<35} score={th['composite']:.0f}")
+        # ── Post: bridge + themes ─────────────────────────────────────────
+        trk.start("news-market bridge · themes...")
+        _refresh()
+        news_market_summary = build_news_market_summary(headlines, all_poly)
+        _refresh("computing retail trend...")
+        retail_trend = compute_retail_trend(wsb_signal, universe_map, short_data)
 
-    print(f"  ⏱  {time.time()-t:.1f}s")
+        signals = {
+            "collected_at":        datetime.now().isoformat(),
+            "universe_size":       len(tickers),
+            "rated_ticker_count":  len(rated_tickers),
+            "universe_map": {
+                k: {"sector":v.get("sector",""),"region":v.get("region",""),
+                    "type":v.get("type","stock"),"name":v.get("name","")}
+                for k,v in universe_map.items()
+            },
+            "macro":               macro_signal,
+            "polymarket_geo":      poly_geo,
+            "polymarket_rates":    poly_rates,
+            "polymarket_economy":  poly_economy,
+            "polymarket_indices":  poly_indices,
+            "polymarket_earnings": poly_earnings,
+            "polymarket_stocks":   poly_stocks,
+            "polymarket_alpha":    poly_alpha,
+            "polymarket_macro":    poly_macro,
+            "polymarket_company":  poly_company,
+            "gdelt":               gdelt_data,
+            "news":                news_data,
+            "price_data":          price_data,
+            "price_stats":         price_stats,
+            "fundamentals":        fundamentals,
+            "earnings":            earnings_catalog,
+            "insider":             insider_data,
+            "options":             options_data,
+            "short_interest":      short_data,
+            "wsb":                 wsb_signal,
+            "btc":                 btc_signal,
+            "sentiment":           sentiment,
+            "bond_yields":         bond_yields,
+            "currencies":          currencies,
+            "sector_etfs":         sector_etfs,
+            "commodities_ext":     commodities_ext,
+            "news_market_bridge":  news_market_summary,
+            "retail_trend":        retail_trend,
+            "events":              [],
+            "themes":              [],
+        }
 
-    # ── Fast scorer ──────────────────────────────────────────────────────────
-    _hdr("SCORE", "Fast Scorer")
-    t = time.time()
-    fast_scores = score_all_assets(signals)
-    signals["fast_scores"] = fast_scores
+        _refresh("scoring themes...")
+        themes = score_themes(signals)
+        signals["themes"] = themes
+        top3   = " | ".join(f"{t['label']} ({t['composite']:.0f})" for t in themes[:3])
+        cov    = news_market_summary.get("coverage_pct",0)
+        trk.done(f"bridge {cov}% · {len(themes)} themes · {top3[:45]}")
+        _refresh()
 
-    grades = [s["grade"].replace(" ⚠","") for s in fast_scores.values()]
-    no_sig = sum(1 for s in fast_scores.values() if s.get("no_signal"))
-    buckets = {
-        "AAA–AA-": sum(1 for g in grades if g in {"AAA","AA+","AA","AA-"}),
-        "A+–A-":   sum(1 for g in grades if g in {"A+","A","A-"}),
-        "BBB":     sum(1 for g in grades if "BBB" in g),
-        "BB":      sum(1 for g in grades if g in {"BB+","BB","BB-"}),
-        "B–CC":    sum(1 for g in grades if g in {"B","CCC","CC"}),
-    }
-    _stat("Total scored", len(fast_scores))
-    _stat("⚠ No-signal flags", no_sig, len(fast_scores))
-    for bucket, cnt in buckets.items():
-        _stat(f"  Grade {bucket}", cnt, len(fast_scores))
-    score_vals = [s["score"] for s in fast_scores.values()]
-    _ok(f"Score range: {min(score_vals)}–{max(score_vals)}  avg={sum(score_vals)/len(score_vals):.1f}")
-    high_priority = [t2 for t2, s in fast_scores.items() if s["score"] >= 70]
-    _stat("Flagged for deep rating (≥70)", len(high_priority), len(fast_scores))
-    if high_priority[:8]:
-        _ok(f"Top picks: {', '.join(high_priority[:8])}")
-    print(f"  ⏱  {time.time()-t:.1f}s")
+        # ── Scoring ───────────────────────────────────────────────────────
+        trk.start(f"scoring {len(universe_map)} assets...")
+        _refresh()
+        fast_scores = score_all_assets(signals)
+        signals["fast_scores"] = fast_scores
+        score_vals   = [s["score"] for s in fast_scores.values()]
+        no_sig       = sum(1 for s in fast_scores.values() if s.get("no_signal"))
+        high_pri     = [t for t,s in fast_scores.items() if s["score"]>=70]
+        top8         = " ".join(high_pri[:8])
+        trk.done(
+            f"{len(fast_scores)} scored · range {min(score_vals)}–{max(score_vals)} "
+            f"avg {sum(score_vals)/len(score_vals):.0f} · ⚠{no_sig} · top: {top8[:30]}"
+        )
+        _refresh()
 
-    # ── Save signals ──────────────────────────────────────────────────────────
-    out_path = "data/signals.json"
-    with open(out_path, "w") as f:
-        json.dump(signals, f, indent=2, default=str)
-    size_kb = Path(out_path).stat().st_size / 1024
+        # ── Save ─────────────────────────────────────────────────────────
+        out_path = "data/signals.json"
+        with open(out_path,"w") as f:
+            json.dump(signals, f, indent=2, default=str)
+        size_kb = Path(out_path).stat().st_size / 1024
 
-    # ── Portfolio analytics ───────────────────────────────────────────────────
-    portfolio_path  = Path("input/portfolio.csv")
-    analytics_path  = Path("data/portfolio_analytics_cache.json")
-    skip_analytics  = False
-    if fast and analytics_path.exists():
-        try:
-            age_hours = (datetime.now() - datetime.fromtimestamp(analytics_path.stat().st_mtime)).total_seconds() / 3600
-            if age_hours < 6:
-                _warn(f"Portfolio analytics cache {age_hours:.1f}h old — skipping (fast mode)")
-                skip_analytics = True
-        except Exception:
-            pass
+        # ── Portfolio analytics ───────────────────────────────────────────
+        portfolio_path = Path("input/portfolio.csv")
+        analytics_path = Path("data/portfolio_analytics_cache.json")
+        skip_analytics = False
+        if fast and analytics_path.exists():
+            try:
+                age_h = (datetime.now()-datetime.fromtimestamp(analytics_path.stat().st_mtime)).total_seconds()/3600
+                if age_h < 6:
+                    trk.start(f"portfolio analytics cache {age_h:.1f}h old — skipping (fast mode)")
+                    trk.done("skipped (cache fresh)")
+                    _refresh()
+                    skip_analytics = True
+            except Exception:
+                pass
 
-    if portfolio_path.exists() and not skip_analytics:
-        _hdr("PORT", "Portfolio Analytics")
-        t = time.time()
-        try:
-            from tools.portfolio_tools import (
-                parse_portfolio, fetch_current_prices, compute_portfolio_summary,
-            )
-            from tools.portfolio_analytics import (
-                build_roi_timeseries, compute_quant_metrics,
-                compute_position_technicals, compute_concentration_metrics,
-                compute_correlation_matrix,
-            )
-            from tools.portfolio_tools import TICKER_MAP as _TMAP
+        if portfolio_path.exists() and not skip_analytics:
+            trk.start("portfolio: ROI series · benchmarks · quant metrics...")
+            _refresh()
+            try:
+                from tools.portfolio_tools import (
+                    parse_portfolio, fetch_current_prices, compute_portfolio_summary, TICKER_MAP as _TMAP,
+                )
+                from tools.portfolio_analytics import (
+                    build_roi_timeseries, compute_quant_metrics,
+                    compute_position_technicals, compute_concentration_metrics,
+                    compute_correlation_matrix,
+                )
+                portfolio   = parse_portfolio(portfolio_path)
+                _refresh("fetching live prices...")
+                prices      = fetch_current_prices(portfolio["holdings"])
+                summary     = compute_portfolio_summary(portfolio, prices)
+                _refresh("building ROI timeseries + benchmarks...")
+                port_series, bm_series = build_roi_timeseries(portfolio["transactions"])
+                sp500_s     = bm_series.get("S&P 500")
+                metrics     = compute_quant_metrics(port_series, sp500_s)
+                _refresh("technicals · concentration · correlation...")
+                tech        = compute_position_technicals(portfolio["holdings"], _TMAP)
+                conc        = compute_concentration_metrics(summary["positions"])
+                corr        = compute_correlation_matrix(portfolio["holdings"], _TMAP)
+                analytics   = {
+                    "computed_at":   datetime.now().isoformat(),
+                    "summary": {"totals":summary["totals"],"positions":summary["positions"],"realized_detail":summary["realized_detail"]},
+                    "portfolio_roi": {str(k.date()):v for k,v in port_series.items()},
+                    "benchmark_roi": {name:{str(k.date()):v for k,v in s.items()} for name,s in bm_series.items()},
+                    "quant_metrics": metrics,"technicals":tech,"concentration":conc,"correlation":corr,
+                }
+                with open("data/portfolio_analytics_cache.json","w") as f:
+                    json.dump(analytics, f, indent=2, default=str)
+                tot = summary["totals"]
+                trk.done(
+                    f"€{tot['current_value']:,.0f} ({tot['unrealized_pct']:+.1f}%) "
+                    f"ROI={port_series.iloc[-1]:+.2f}% Sharpe={metrics.get('sharpe','?')}"
+                )
+            except Exception as e:
+                trk.fail(f"failed: {e}")
+            _refresh()
 
-            portfolio = parse_portfolio(portfolio_path)
-            prices    = fetch_current_prices(portfolio["holdings"])
-            summary   = compute_portfolio_summary(portfolio, prices)
-            port_series, bm_series = build_roi_timeseries(portfolio["transactions"])
-            sp500_s   = bm_series.get("S&P 500")
-            metrics   = compute_quant_metrics(port_series, sp500_s)
-            tech      = compute_position_technicals(portfolio["holdings"], _TMAP)
-            conc      = compute_concentration_metrics(summary["positions"])
-            corr      = compute_correlation_matrix(portfolio["holdings"], _TMAP)
-
-            analytics = {
-                "computed_at":    datetime.now().isoformat(),
-                "summary": {
-                    "totals":          summary["totals"],
-                    "positions":       summary["positions"],
-                    "realized_detail": summary["realized_detail"],
-                },
-                "portfolio_roi":  {str(k.date()): v for k, v in port_series.items()},
-                "benchmark_roi":  {
-                    name: {str(k.date()): v for k, v in s.items()}
-                    for name, s in bm_series.items()
-                },
-                "quant_metrics":  metrics,
-                "technicals":     tech,
-                "concentration":  conc,
-                "correlation":    corr,
-            }
-            with open("data/portfolio_analytics_cache.json", "w") as f:
-                json.dump(analytics, f, indent=2, default=str)
-            tot = summary["totals"]
-            _ok(f"Invested: €{tot['total_invested']:,.0f}  Value: €{tot['current_value']:,.0f}  Return: {tot['unrealized_pct']:+.1f}%")
-            _ok(f"Sharpe={metrics.get('sharpe','?')}  Sortino={metrics.get('sortino','?')}  Max DD={metrics.get('max_drawdown','?')}")
-            _ok(f"ROI series: {port_series.iloc[-1]:+.2f}%  |  {len(portfolio['holdings'])} open positions")
-            _stat("Positions priced", sum(1 for v in prices.values() if v), len(portfolio["holdings"]))
-        except Exception as e:
-            _warn(f"Analytics failed: {e}")
-        print(f"  ⏱  {time.time()-t:.1f}s")
-
-    # ── Final summary ──────────────────────────────────────────────────────────
-    total_elapsed = time.time() - _T0
-    print(f"\n{'═'*55}")
-    print(f"  COLLECTION COMPLETE  {total_elapsed:.1f}s total")
-    print(f"  signals.json  {size_kb:.0f} KB  |  {len(fast_scores)} assets scored")
-    print(f"  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"{'═'*55}\n")
+    # ── Final summary (outside Live) ──────────────────────────────────────────
+    total_s = round(time.time() - trk._t0, 1)
+    console.print(f"\n[bold green]✓ Collection complete[/bold green]  "
+                  f"[dim]{total_s}s · {size_kb:.0f} KB · {len(fast_scores)} assets scored[/dim]")
 
     return signals
 
