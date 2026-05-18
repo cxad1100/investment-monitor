@@ -173,27 +173,38 @@ def collect(fast: bool = False) -> dict:
     _hdr("4/13", "Polymarket Prediction Markets")
     t = time.time()
     poly_data = fetch_all_investment_markets()
-    poly_geo     = poly_data["geo"]
-    poly_macro   = poly_data["macro"]
-    poly_company = poly_data["company"]
-    poly_alpha   = poly_data.get("alpha", [])
-    all_poly     = poly_geo + poly_macro + poly_company
-    _stat("Geo markets",     len(poly_geo))
-    _stat("Macro markets",   len(poly_macro))
-    _stat("Company markets", len(poly_company))
+    poly_geo      = poly_data["geo"]
+    poly_rates    = poly_data.get("rates", [])
+    poly_economy  = poly_data.get("economy", [])
+    poly_indices  = poly_data.get("indices", [])
+    poly_earnings = poly_data.get("earnings", [])
+    poly_stocks   = poly_data.get("stocks", [])
+    poly_alpha    = poly_data.get("alpha", [])
+    poly_macro    = poly_data.get("macro", [])   # legacy
+    poly_company  = poly_data.get("company", []) # legacy
+    all_poly      = poly_geo + poly_rates + poly_economy + poly_indices + poly_earnings + poly_stocks
+    total_markets = len(all_poly)
+    _stat("Total markets fetched", total_markets)
+    _stat("  Geo",             len(poly_geo))
+    _stat("  Rates (CB)",      len(poly_rates))
+    _stat("  Economy",         len(poly_economy))
+    _stat("  Indices",         len(poly_indices))
+    _stat("  Earnings",        len(poly_earnings))
+    _stat("  Stocks",          len(poly_stocks))
     conv_bull = [m for m in poly_alpha if m["alpha_signal"] == "conviction_bull"]
     conv_bear = [m for m in poly_alpha if m["alpha_signal"] == "conviction_bear"]
     uncertain = [m for m in poly_alpha if m["alpha_signal"] == "uncertainty_alpha"]
     _stat("Alpha: conviction-bull",  len(conv_bull))
     _stat("Alpha: conviction-bear",  len(conv_bear))
     _stat("Alpha: uncertainty",      len(uncertain))
-    if conv_bull:
-        _ok(f"Top bull: {conv_bull[0]['question'][:60]}  ({conv_bull[0]['probability']:.0%})")
-    if conv_bear:
-        _ok(f"Top bear: {conv_bear[0]['question'][:60]}  ({conv_bear[0]['probability']:.0%})")
-    if uncertain:
-        u = uncertain[0]
-        _ok(f"Top uncertain: {u['question'][:60]}  ({u['probability']:.0%}, {u.get('days_to_resolution','?')}d)")
+    for m in conv_bull[:2]:
+        _ok(f"  ↑ {m['question'][:65]}  ({m['probability']:.0%})")
+    for m in conv_bear[:2]:
+        _warn(f" ↓ {m['question'][:65]}  ({m['probability']:.0%})")
+    for m in uncertain[:2]:
+        _ok(f"  ? {m['question'][:60]}  ({m['probability']:.0%}, {m.get('days_to_resolution','?')}d)")
+    if poly_earnings:
+        _ok(f"Top earnings market: {poly_earnings[0]['question'][:65]}  ({poly_earnings[0]['probability']:.0%})")
     print(f"  ⏱  {time.time()-t:.1f}s")
 
     # ── 5. GDELT ─────────────────────────────────────────────────────────────
@@ -385,10 +396,15 @@ def collect(fast: bool = False) -> dict:
             for k, v in universe_map.items()
         },
         "macro":              macro_signal,
-        "polymarket_geo":     poly_geo,
-        "polymarket_macro":   poly_macro,
-        "polymarket_company": poly_company,
-        "polymarket_alpha":   poly_alpha,
+        "polymarket_geo":      poly_geo,
+        "polymarket_rates":    poly_rates,
+        "polymarket_economy":  poly_economy,
+        "polymarket_indices":  poly_indices,
+        "polymarket_earnings": poly_earnings,
+        "polymarket_stocks":   poly_stocks,
+        "polymarket_alpha":    poly_alpha,
+        "polymarket_macro":    poly_macro,
+        "polymarket_company":  poly_company,
         "gdelt":              gdelt_data,
         "news":               news_data,
         "price_data":         price_data,
