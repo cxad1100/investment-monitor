@@ -1,13 +1,16 @@
 """Streamlit dashboard for weekly investment ratings."""
 
 import json
+import os
+import subprocess
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-import re as _re
+from tools.portfolio_tools import RATING_LOOKUP, COMPANY_NAMES as PORTFOLIO_NAMES
 
 # ── Sector → relevant event group IDs ───────────────────────────────────────
 SECTOR_GROUPS = {
@@ -296,20 +299,21 @@ def build_deep_dive(ticker: str, signals: dict) -> dict:
     current_price = fund.get("current_price")
 
     if analyst_score is not None and n_analysts >= 3:
+        rating_label = analyst_rating.replace("_", " ").title() if analyst_rating else ""
         if analyst_score <= 1.8:
-            pros.append(f"Strong analyst consensus: {n_analysts} analysts rate '{analyst_rating}' (score {analyst_score:.1f}/5)")
+            pros.append(f"Strong analyst consensus: {n_analysts} analysts rate '{rating_label}' (score {analyst_score:.1f}/5)")
         elif analyst_score <= 2.5:
-            pros.append(f"Analyst consensus buy: {n_analysts} analysts rate '{analyst_rating}'")
+            pros.append(f"Analyst consensus buy: {n_analysts} analysts rate '{rating_label}'")
         elif analyst_score >= 3.5:
-            cons.append(f"Weak analyst consensus: {n_analysts} analysts rate '{analyst_rating}' (score {analyst_score:.1f}/5)")
+            cons.append(f"Weak analyst consensus: {n_analysts} analysts rate '{rating_label}' (score {analyst_score:.1f}/5)")
 
     if upside is not None:
         if upside >= 20:
-            pros.append(f"Significant upside to analyst consensus target: +{upside:.1f}% (target ${target_price} vs current ${current_price})")
+            pros.append(f"Significant upside to analyst consensus target: +{upside:.1f}% (target {target_price} vs current {current_price})")
         elif upside >= 10:
-            pros.append(f"Upside to analyst target: +{upside:.1f}% (${target_price})")
+            pros.append(f"Upside to analyst target: +{upside:.1f}% (target {target_price})")
         elif upside < -5:
-            cons.append(f"Trading above analyst consensus target: {upside:.1f}% downside (target ${target_price})")
+            cons.append(f"Trading above analyst consensus target: {upside:.1f}% downside (target {target_price})")
 
     if next_earnings:
         from datetime import date
@@ -588,9 +592,54 @@ def build_world_summary(signals: dict) -> dict:
     }
 
 
-DATA_DIR = Path("data")
-SIGNALS_FILE = DATA_DIR / "signals.json"
-RATINGS_FILE = DATA_DIR / "ratings_report.json"
+DATA_DIR       = Path("data")
+SIGNALS_FILE   = DATA_DIR / "signals.json"
+RATINGS_FILE   = DATA_DIR / "ratings_report.json"
+ANALYTICS_FILE = DATA_DIR / "portfolio_analytics_cache.json"
+STATUS_FILE    = DATA_DIR / "collect_status.json"
+COLLECT_LOG    = DATA_DIR / "collect.log"
+
+
+def _collect_status() -> dict:
+    if not STATUS_FILE.exists():
+        return {"status": "idle"}
+    try:
+        return json.loads(STATUS_FILE.read_text())
+    except Exception:
+        return {"status": "idle"}
+
+
+def _is_running(status: dict) -> bool:
+    pid = status.get("pid")
+    if not pid:
+        return False
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except OSError:
+        return False
+
+
+def _start_collect(fast: bool = True):
+    DATA_DIR.mkdir(exist_ok=True)
+    cmd = [".venv/bin/python", "collect_all.py"] + (["--fast"] if fast else [])
+    log_f = open(COLLECT_LOG, "w")
+    proc  = subprocess.Popen(cmd, stdout=log_f, stderr=subprocess.STDOUT)
+    STATUS_FILE.write_text(json.dumps({
+        "status":     "running",
+        "mode":       "fast" if fast else "full",
+        "started_at": datetime.now().isoformat(),
+        "pid":        proc.pid,
+    }))
+
+
+def _load_analytics_cache() -> dict | None:
+    if not ANALYTICS_FILE.exists():
+        return None
+    try:
+        return json.loads(ANALYTICS_FILE.read_text())
+    except Exception:
+        return None
 
 GRADE_ORDER = ["AAA", "AA+", "AA", "AA-", "A+", "A", "A-",
                "BBB+", "BBB", "BBB-", "BB+", "BB", "BB-", "B", "CCC", "CC"]
@@ -629,10 +678,13 @@ def grade_badge(grade: str) -> str:
 def scores_to_df(fast_scores: dict) -> pd.DataFrame:
     rows = []
     for ticker, v in fast_scores.items():
+        grade = v.get("grade", "B")
+        if v.get("no_signal"):
+            grade = f"{grade} ⚠"
         rows.append({
             "Ticker": ticker,
             "Score": v.get("score", 0),
-            "Grade": v.get("grade", "B"),
+            "Grade": grade,
             "Sector": v.get("sector", ""),
             "Region": v.get("region", ""),
             "Type": v.get("type", "stock"),
@@ -644,135 +696,52 @@ def scores_to_df(fast_scores: dict) -> pd.DataFrame:
 
 # ── Page config ─────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="TR Investment Ratings",
+    page_title="Monitor",
     page_icon=None,
     layout="wide",
     initial_sidebar_state="collapsed",
 )
-st.title("Trade Republic — Weekly Investment Ratings")
-
 signals = load_signals()
 ratings = load_ratings()
 
+st.title("Monitor")
+
+# ── Global status checks (must run before tabs) ───────────────────────────────
+status = _collect_status()
+running = _is_running(status)
+
+if status.get("status") == "running" and not running:
+    status["status"] = "done"
+    status["finished_at"] = datetime.now().isoformat()
+    STATUS_FILE.write_text(json.dumps(status))
+    st.cache_data.clear()
+    st.rerun()
+
 if signals is None:
-    st.warning("No signals.json found. Run `python collect_all.py` first.")
+    st.warning("No data yet — run Research first.")
     st.stop()
 
-collected_at = signals.get("collected_at", "unknown")
-st.caption(f"Data collected: {collected_at}  ·  Universe: {signals.get('universe_size', '?')} assets")
+if running:
+    import time
+    time.sleep(15)
+    st.rerun()
 
-# ── World View Summary ────────────────────────────────────────────────────────
+# ── World View (computed once, used in Research tab) ─────────────────────────
 world = build_world_summary(signals)
+collected_at = signals.get("collected_at", "unknown")
 
-with st.container():
-    st.markdown("## World View")
-
-    _regime_desc = {
-        "growth":      "GDP expanding, earnings growing, risk assets outperforming. Favours cyclicals: Technology, Consumer Discretionary, Financials.",
-        "inflation":   "Prices rising faster than growth. Hard assets and commodities outperform. Favours Energy, Materials, short-duration assets.",
-        "stagflation": "Slow growth + high inflation. Worst combo for equities. Defensives (Staples, Healthcare, Utilities) and commodities preferred.",
-        "deflation":   "Falling prices, weak demand. Bonds outperform. Defensives and dividend stocks hold value; avoid cyclicals.",
-        "recession":   "Economic contraction. Earnings falling broadly. Capital preservation priority; Staples, Utilities, Healthcare, cash.",
-    }
-    _risk_desc = {
-        "low":    "Low volatility, tight credit spreads, strong momentum. Risk assets broadly supported.",
-        "medium": "Mixed signals — some caution warranted. Selective positioning; favour quality over momentum.",
-        "high":   "Elevated uncertainty. Credit spreads widening, volatility rising. Reduce cyclical exposure, increase defensives.",
-    }
-
-    m1, m2, m3, m4, m5, m6 = st.columns(6)
-    m1.metric("Macro Regime", world["regime"].title(),
-              help=_regime_desc.get(world["regime"], "Current macroeconomic regime derived from FRED indicators: Fed funds rate, CPI trend, yield curve, GDP growth."))
-    m2.metric("Risk Level", world["risk_level"].upper(),
-              help=_risk_desc.get(world["risk_level"], "Composite risk assessment combining regime uncertainty, credit spreads, and VIX level."))
-    vix = world.get("vix")
-    m3.metric("VIX", f"{vix:.1f}  {world['vix_regime'].replace('_',' ')}" if vix else "N/A",
-              help=(
-                  "CBOE Volatility Index — measures 30-day implied volatility of S&P 500 options. "
-                  "Below 15: complacency. 15-20: calm. 20-25: elevated. 25-30: fear. Above 30: extreme fear. "
-                  f"Current 1Y range: {world.get('vix_1y_low','?')} – {world.get('vix_1y_high','?')}."
-              ))
-    fg = world.get("fg_score")
-    m4.metric("Fear / Greed", f"{fg:.0f}  {world['fg_rating'].replace('_',' ').title()}" if fg else "N/A",
-              help=(
-                  "CNN Fear & Greed Index (0–100). Aggregates 7 signals: market momentum, stock price strength, "
-                  "stock price breadth, put/call ratio, junk bond demand, market volatility, safe haven demand. "
-                  "0–25: Extreme Fear. 25–45: Fear. 45–55: Neutral. 55–75: Greed. 75–100: Extreme Greed. "
-                  "Contrarian signal: extreme greed often precedes corrections."
-              ))
-    m5.metric("Credit Spreads", world["spread_regime"].title() or "N/A",
-              help=(
-                  "HYG/LQD spread proxy — measures the difference in returns between high-yield (HYG) and "
-                  "investment-grade (LQD) bonds. Widening spreads signal rising default risk and credit stress, "
-                  "typically a leading indicator of equity market weakness. Tightening = risk appetite improving."
-              ))
-    m6.metric("Liquidity Signal", world["btc_regime"].replace("_", " ").title() or "N/A",
-              help=(
-                  "Bitcoin vs Gold relative performance as a liquidity proxy. "
-                  "Risk-On: BTC outperforming Gold — institutional risk appetite elevated, growth assets supported. "
-                  "Safe-Haven: Gold outperforming BTC — flight to quality, defensive rotation likely. "
-                  "Risk-Off: both falling — broad liquidity withdrawal."
-              ))
-
-    st.divider()
-
-    col_ev, col_right = st.columns([3, 1])
-
-    with col_ev:
-        st.markdown("#### Key Events and Market Interactions")
-        for item in world["interactions"]:
-            st.markdown(f"**{item['title']}**")
-            for chain in item["chains"]:
-                st.markdown(chain)
-            st.markdown("---")
-
-    with col_right:
-        # ── Cross-source market themes ─────────────────────────────────────
-        themes = signals.get("themes", [])
-        retail = signals.get("retail_trend", {})
-        st.markdown("#### Market Themes")
-        st.caption("Score = news 35% + WSB 25% + Polymarket 25% + macro 15%")
-
-        if themes:
-            for t in themes[:8]:
-                comp = t["composite"]
-                if comp < 5:
-                    continue
-                bar_n = int(min(comp, 50) / 50 * 10)
-                bar = "█" * bar_n + "░" * (10 - bar_n)
-                sources = []
-                if t["news_score"] > 5:  sources.append(f"News {t['news_score']:.0f}")
-                if t["wsb_score"] > 10:  sources.append(f"WSB {t['wsb_score']:.0f}")
-                if t["poly_score"] > 5:  sources.append(f"Poly {t['poly_score']:.0f}")
-                src_str = " · ".join(sources) if sources else "low signal"
-                st.markdown(f"`{bar}` **{t['label']}** {comp:.0f}  \n<span style='color:#888;font-size:0.78em'>{src_str}</span>", unsafe_allow_html=True)
-
-        st.markdown("")
-        if retail:
-            direction = retail.get("trend_direction", "mixed")
-            dir_label = {"risk_on": "RISK ON", "defensive": "DEFENSIVE", "mixed": "MIXED"}.get(direction, direction.upper())
-            st.markdown(f"**Retail: {dir_label}**")
-            st.caption(retail.get("narrative", ""))
-
-        st.markdown("")
-        st.markdown("**Sector Outlook**")
-        for s in world["tailwinds"][:3]:
-            st.markdown(f"+ {s}")
-        for s in world["headwinds"][:3]:
-            st.markdown(f"- {s}")
-
-    st.divider()
-
-def _render_deep_dive(ticker: str, score: int, grade: str, sector: str, asset_type: str, signals: dict):
+def _render_deep_dive(ticker: str, score: int, grade: str, sector: str, asset_type: str, signals: dict,
+                      display_ticker: str | None = None):
     dive = build_deep_dive(ticker, signals)
     company_name = signals.get("fundamentals", {}).get(ticker, {}).get("name", "")
+    show_ticker = display_ticker or ticker
     badge_color = GRADE_COLOR.get(grade, "#888")
     verdict = dive["verdict"]
     v_color = dive["verdict_color"]
 
     header = (
-        f'<span style="font-size:1.1em;font-weight:bold">{ticker}</span>'
-        + (f'&nbsp;&nbsp;<span style="color:#aaa">{company_name}</span>' if company_name and company_name != ticker else "")
+        f'<span style="font-size:1.1em;font-weight:bold">{show_ticker}</span>'
+        + (f'&nbsp;&nbsp;<span style="color:#aaa">{company_name}</span>' if company_name and company_name != show_ticker else "")
         + f'&nbsp;&nbsp;<span style="background:{badge_color};color:#000;padding:2px 8px;border-radius:3px;font-weight:bold;font-size:0.82em">{grade}</span>'
         + f'&nbsp;&nbsp;<span style="background:{v_color};color:#fff;padding:2px 10px;border-radius:3px;font-weight:bold;font-size:0.82em">{verdict}</span>'
         + f'&nbsp;&nbsp;<span style="color:#888;font-size:0.82em">{sector} · {asset_type} · Score {score}/100</span>'
@@ -837,7 +806,7 @@ def _render_deep_dive(ticker: str, score: int, grade: str, sector: str, asset_ty
         r1c4.metric("Analyst Rating", fund.get("analyst_rating", "N/A").title())
         upside_val = fund.get("upside_pct")
         r2c1.metric("Upside to Target", f"{upside_val:+.1f}%" if upside_val is not None else "N/A",
-                    delta=f"Target ${fund.get('target_price','?')}" if upside_val is not None else None)
+                    delta=f"Target {fund.get('target_price','?')}" if upside_val is not None else None)
         r2c2.metric("Put-Call Ratio", f"{opt.get('put_call_ratio'):.2f}" if opt.get("put_call_ratio") else "N/A")
         r2c3.metric("Short Float", f"{sht.get('short_float_pct'):.1f}%" if sht.get("short_float_pct") is not None else "N/A")
         r2c4.metric("Next Earnings", fund.get("next_earnings", "N/A"))
@@ -866,152 +835,788 @@ def _render_deep_dive(ticker: str, score: int, grade: str, sector: str, asset_ty
 
 
 # ── Tabs ─────────────────────────────────────────────────────────────────────
-tab_portfolio, tab_ratings, tab_signals, tab_events, tab_news = st.tabs(
-    ["Portfolio", "Ratings", "Macro Signals", "Events", "News"]
-)
+tab_portfolio, tab_research = st.tabs(["Portfolio", "Research"])
 
 # ── Portfolio ────────────────────────────────────────────────────────────────
-@st.cache_data(ttl=900)
-def load_portfolio():
+@st.cache_data(ttl=60)  # transactions only — fast, no network
+def load_portfolio_transactions():
+    from tools.portfolio_tools import parse_portfolio
+    portfolio_path = DATA_DIR / "portfolio.csv"
+    if not portfolio_path.exists():
+        return None
+    return parse_portfolio(portfolio_path)
+
+
+@st.cache_data(ttl=300)  # live prices — refresh every 5 min
+def fetch_live_summary():
+    """Fetch current prices for open positions and compute live P&L."""
     from tools.portfolio_tools import parse_portfolio, fetch_current_prices, compute_portfolio_summary
     portfolio_path = DATA_DIR / "portfolio.csv"
     if not portfolio_path.exists():
         return None, None
     portfolio = parse_portfolio(portfolio_path)
-    prices = fetch_current_prices(portfolio["holdings"])
-    summary = compute_portfolio_summary(portfolio, prices)
-    return portfolio, summary
+    prices    = fetch_current_prices(portfolio["holdings"])
+    summary   = compute_portfolio_summary(portfolio, prices)
+    return portfolio, summary, datetime.now()
+
+
+def load_analytics_from_cache():
+    """Read pre-computed analytics from cache. Falls back to None if missing."""
+    cache = _load_analytics_cache()
+    if not cache:
+        return None, None, None, None, None
+
+    # Reconstruct pd.Series from JSON dicts
+    port_dict = cache.get("portfolio_roi", {})
+    port_series = pd.Series(
+        list(port_dict.values()),
+        index=pd.to_datetime(list(port_dict.keys())),
+    ) if port_dict else pd.Series(dtype=float)
+
+    bm_series = {}
+    for name, d in cache.get("benchmark_roi", {}).items():
+        s = pd.Series(list(d.values()), index=pd.to_datetime(list(d.keys())))
+        bm_series[name] = s
+
+    metrics      = cache.get("quant_metrics", {})
+    technicals   = cache.get("technicals", {})
+    concentration = cache.get("concentration", {})
+    return port_series, bm_series, metrics, technicals, concentration
+
+# ── ETF sector decomposition ─────────────────────────────────────────────────
+ETF_SECTOR_WEIGHTS = {
+    "IWDA.AS": {   # iShares MSCI World — approximate weights (rebalanced quarterly)
+        "Information Technology": 0.240,
+        "Financials":             0.155,
+        "Healthcare":             0.120,
+        "Industrials":            0.110,
+        "Consumer Discretionary": 0.105,
+        "Communication Services": 0.080,
+        "Consumer Staples":       0.060,
+        "Energy":                 0.050,
+        "Materials":              0.040,
+        "Real Estate":            0.025,
+        "Utilities":              0.015,
+    },
+}
+
+
+# Module-level: needed by portfolio fragment
+_port_fast_scores  = signals.get("fast_scores", {})
+_port_fundamentals = signals.get("fundamentals", {})
+_port_themes       = signals.get("themes", [])
+
+
+@st.fragment(run_every=300)
+def _live_portfolio():
+    import plotly.graph_objects as go
+    fast_scores  = _port_fast_scores
+    fundamentals = _port_fundamentals
+    result = fetch_live_summary()
+    if result[0] is None:
+        st.warning("Could not fetch live prices.")
+        return
+    _portfolio, summary, fetched_at = result
+    all_txns = sorted(_portfolio["transactions"], key=lambda x: x["date"])
+    tot = summary["totals"]
+
+    # Compute YTD from ROI cache
+    _port_roi = _load_analytics_cache() or {}
+    _roi_dict = _port_roi.get("portfolio_roi", {})
+    _ytd_pct  = None
+    _yp       = []
+    if _roi_dict:
+        from collections import defaultdict as _dd
+        _by_year = _dd(list)
+        for _d, _v in sorted(_roi_dict.items()):
+            _by_year[_d[:4]].append(_v)
+        _prev = 0.0
+        for _yr in sorted(_by_year):
+            _end = _by_year[_yr][-1]
+            _ret = (1 + _end / 100) / (1 + _prev / 100) - 1
+            _label = "YTD" if _yr == str(datetime.now().year) else _yr
+            _yp.append((_label, _ret * 100))
+            if _label == "YTD":
+                _ytd_pct = _ret * 100
+            _prev = _end
+
+    _total_pnl_pct = (tot["total_pnl"] / tot["total_invested"] * 100) if tot["total_invested"] else 0
+
+    # ── Row 1: what matters most ──────────────────────────────────────
+    r1a, r1b, r1c, r1ts = st.columns([3, 3, 3, 1])
+    r1a.metric("Portfolio Value", f"€{tot['current_value']:,.2f}",
+               help="Live market value. Prices from yfinance (15-20 min delay vs TR).")
+    r1b.metric("Total P&L", f"€{tot['total_pnl']:+,.2f}",
+               help="Unrealized gains/losses + realized from closed positions.")
+    r1c.metric("Total Return", f"{_total_pnl_pct:+.1f}%",
+               help="Total P&L as % of total invested capital.")
+    with r1ts:
+        st.caption(f"Prices: {fetched_at.strftime('%H:%M')}")
+        if st.button("Refresh", key="refresh_prices"):
+            fetch_live_summary.clear()
+            st.rerun(scope="fragment")
+
+    # ── Row 2: context ────────────────────────────────────────────────
+    _yoy_help = (
+        "Calendar-year return reconstructed from real buy prices.\n\n"
+        "Method: (1 + ROI_year_end) / (1 + ROI_prev_year_end) − 1.\n"
+        "YTD = same from 1 Jan to today."
+    )
+    _past = [(l, r) for l, r in _yp if l != "YTD"]
+    _past_str = "  ·  ".join(f"{l} {r:+.1f}%" for l, r in _past)
+
+    r2a, r2b, r2c = st.columns(3)
+    r2a.metric("Invested", f"€{tot['total_invested']:,.0f}",
+               help="Total EUR deployed (sum of all buy transactions).")
+    r2b.metric("YTD", f"{_ytd_pct:+.2f}%" if _ytd_pct is not None else "—",
+               help=_yoy_help)
+    if _past_str:
+        r2c.markdown(
+            f'<div style="padding-top:8px">'
+            f'<span style="font-size:0.75em;color:#888">Past years</span><br>'
+            f'<span style="font-size:0.9em">{_past_str}</span></div>',
+            unsafe_allow_html=True,
+        )
+
+    st.divider()
+
+    # ── Positions ────────────────────────────────────────────────────
+    _, _, _, tech_cache, _ = load_analytics_from_cache()
+    technicals = tech_cache or {}
+
+    positions = summary["positions"]
+    _total_val = sum(p["position_value"] for p in positions) or 1.0
+
+    def _render_html_bar(segs: list[dict], height: int = 56) -> None:
+        """Pure HTML/JS stacked bar. Hover tooltip injected into parent Streamlit frame."""
+        import json as _json
+        import streamlit.components.v1 as _c
+        _data = _json.dumps([
+            {"pct": s["pct"], "color": s["color"],
+             "label": s["label"], "tip": s["tip"]}
+            for s in segs
+        ])
+        _html = f"""<!DOCTYPE html><html><head><style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{background:transparent}}
+.bar{{display:flex;width:100%;height:{height}px;border-radius:4px;overflow:hidden}}
+.seg{{display:flex;flex-direction:column;align-items:center;justify-content:center;
+      color:white;font-size:11px;text-align:center;overflow:hidden;
+      white-space:pre-line;line-height:1.25;cursor:default;padding:0 3px}}
+</style></head><body>
+<div class="bar" id="b"></div>
+<script>
+const data={_data};
+const bar=document.getElementById('b');
+function tip(){{
+  try{{
+    const d=window.parent.document;
+    let t=d.getElementById('_hbar_tip');
+    if(!t){{
+      t=d.createElement('div');t.id='_hbar_tip';
+      t.style.cssText='position:fixed;background:rgba(18,18,18,0.93);color:#fff;'+
+        'padding:9px 13px;border-radius:7px;font-size:13px;line-height:1.5;'+
+        'white-space:pre-line;z-index:999999;pointer-events:none;display:none;'+
+        'max-width:380px;box-shadow:0 3px 12px rgba(0,0,0,.5);font-family:sans-serif';
+      d.body.appendChild(t);
+    }}
+    return t;
+  }}catch(e){{return null;}}
+}}
+data.forEach(s=>{{
+  const el=document.createElement('div');
+  el.className='seg';
+  el.style.width=s.pct+'%';
+  el.style.background=s.color;
+  el.textContent=s.label;
+  el.addEventListener('mousemove',e=>{{
+    const t=tip();if(!t)return;
+    const fr=window.frameElement;
+    const r=fr?fr.getBoundingClientRect():{{left:0,top:0}};
+    t.innerHTML=s.tip;t.style.display='block';
+    const tx=r.left+e.clientX+14;
+    const ty=r.top+e.clientY-50;
+    const pw=window.parent.innerWidth||800;
+    t.style.left=Math.min(tx,pw-400)+'px';
+    t.style.top=Math.max(ty,4)+'px';
+  }});
+  el.addEventListener('mouseleave',()=>{{const t=tip();if(t)t.style.display='none';}});
+  bar.appendChild(el);
+}});
+</script></body></html>"""
+        _c.html(_html, height=height + 2, scrolling=False)
+
+    # ── Allocation bar ────────────────────────────────────────────────
+    _sorted_pos = sorted(positions, key=lambda p: -p["position_value"])
+    _colors = [
+        "#2196F3","#4CAF50","#FF9800","#E91E63","#9C27B0",
+        "#00BCD4","#8BC34A","#FF5722","#607D8B","#795548",
+    ]
+    _alloc_segs = []
+    for _idx, _p in enumerate(_sorted_pos):
+        _tk = _p["ticker"]
+        _nm = PORTFOLIO_NAMES.get(_tk, _tk)
+        _wt = _p["position_value"] / _total_val * 100
+        _alloc_segs.append({
+            "pct": _wt,
+            "color": _colors[_idx % len(_colors)],
+            "label": f"{_tk}\n{_wt:.1f}%",
+            "tip": f"<b>{_tk}</b> — {_nm}<br>€{_p['position_value']:,.2f}&nbsp;&nbsp;{_wt:.1f}%",
+        })
+    _render_html_bar(_alloc_segs, height=56)
+
+    # ── Sector bar (ETFs decomposed into underlying sectors) ──────────
+    _SECTOR_COLORS = {
+        "Information Technology": "#2196F3",
+        "Communication Services": "#00BCD4",
+        "Consumer Discretionary": "#FF9800",
+        "Financials":             "#4CAF50",
+        "Industrials":            "#9E9E9E",
+        "Energy":                 "#FF5722",
+        "Healthcare":             "#E91E63",
+        "Consumer Staples":       "#8BC34A",
+        "Real Estate":            "#AB47BC",
+        "Materials":              "#78909C",
+        "Utilities":              "#26C6DA",
+        "Unknown":                "#607D8B",
+    }
+
+    # {sector: {total_val, [(ticker, val, label)]}}
+    _sec_data: dict[str, dict] = {}
+
+    def _add_sec(sec, val, tk, label):
+        if sec not in _sec_data:
+            _sec_data[sec] = {"val": 0.0, "items": []}
+        _sec_data[sec]["val"] += val
+        _sec_data[sec]["items"].append((tk, val, label))
+
+    for _p in _sorted_pos:
+        _tk  = _p["ticker"]
+        _rtk = RATING_LOOKUP.get(_tk, _tk)
+        _se  = fast_scores.get(_rtk, {})
+        _nm  = PORTFOLIO_NAMES.get(_tk, _tk)
+        _pv  = _p["position_value"]
+        _is_etf = _se.get("type", "stock") == "etf"
+
+        if _is_etf and _rtk in ETF_SECTOR_WEIGHTS:
+            # Decompose ETF into sectors
+            _etf_weights = ETF_SECTOR_WEIGHTS[_rtk]
+            _total_w = sum(_etf_weights.values())
+            for _sec, _sw in _etf_weights.items():
+                _contrib = _pv * (_sw / _total_w)
+                _add_sec(_sec, _contrib, _tk,
+                         f"{_nm} ({_sw/_total_w*100:.0f}% of ETF → {_contrib/_total_val*100:.1f}% portfolio)")
+        else:
+            _sec = _se.get("sector", "Unknown") or "Unknown"
+            _add_sec(_sec, _pv, _tk, f"{_nm} ({_pv/_total_val*100:.1f}%)")
+
+    _sec_segs = []
+    for _sec, _sd in sorted(_sec_data.items(), key=lambda x: -x[1]["val"]):
+        _val = _sd["val"]
+        _wt  = _val / _total_val * 100
+        _parts = [f"<b>{_sec}</b> — {_wt:.1f}% (EUR {_val:,.0f})"]
+        for _, _cv, _clabel in sorted(_sd["items"], key=lambda x: -x[1]):
+            _parts.append(f"  {_clabel}")
+        _sec_segs.append({
+            "pct":   _wt,
+            "color": _SECTOR_COLORS.get(_sec, "#607D8B"),
+            "label": f"{_sec}\n{_wt:.1f}%",
+            "tip":   "<br>".join(_parts),
+        })
+    _render_html_bar(_sec_segs, height=56)
+
+    # ── Position table (essentials only) ─────────────────────────────
+    def _signal_label(tech: dict) -> str:
+        ma = tech.get("ma_signal", "")
+        rsi = tech.get("rsi", 50)
+        if ma == "BULLISH" and rsi < 70:
+            return "BUY"
+        if ma == "BEARISH" or rsi > 75:
+            return "SELL"
+        if ma == "BULLISH":
+            return "HOLD"
+        return "NEUTRAL"
+
+    _rows = []
+    for _p in _sorted_pos:
+        _tk  = _p["ticker"]
+        _rtk = RATING_LOOKUP.get(_tk, _tk)
+        _se  = fast_scores.get(_rtk, {})
+        _nm  = PORTFOLIO_NAMES.get(_tk) or fundamentals.get(_rtk, {}).get("name", _tk)
+        _tch = technicals.get(_tk, {})
+        _is_etf = _se.get("type", "stock") == "etf"
+        _rows.append({
+            "Ticker":   _tk,
+            "Name":     _nm,
+            "Type":     "ETF" if _is_etf else "Stock",
+            "Value €":  _p["position_value"],
+            "Return":   _p["unrealized_pct"],
+            "P&L €":    _p["unrealized_pnl"],
+            "Grade":    (_se.get("grade", "—") + " ⚠") if _se.get("no_signal") else _se.get("grade", "—"),
+            "Score":    int(_se["score"]) if _se.get("score") is not None else None,
+            "Signal":   _signal_label(_tch),
+            "RSI":      _tch.get("rsi"),
+            "Mom 1M":   _tch.get("mom_1m"),
+        })
+
+    _df = pd.DataFrame(_rows).set_index("Ticker")
+    st.dataframe(
+        _df,
+        width="stretch",
+        column_config={
+            "Value €": st.column_config.NumberColumn(format="€%.0f"),
+            "Return":  st.column_config.NumberColumn("Return %", format="%+.1f%%"),
+            "P&L €":   st.column_config.NumberColumn(format="€%+.0f"),
+            "Score":   st.column_config.ProgressColumn("Score", min_value=0, max_value=100, format="%d"),
+            "RSI":     st.column_config.NumberColumn(format="%.0f"),
+            "Mom 1M":  st.column_config.NumberColumn("1M Mom", format="%+.1f%%"),
+        },
+        height=min(80 + len(_rows) * 50, 520),
+    )
+
+    # Closed positions
+    realized = summary["realized_detail"]
+    if realized:
+        with st.expander("Closed Positions"):
+            r_rows = [{"Ticker": tk, "Company": PORTFOLIO_NAMES.get(tk, ""),
+                       "Shares Sold": r["shares_sold"],
+                       "Proceeds €": round(r["proceeds"], 2),
+                       "Realized P&L €": round(r["pnl_eur"], 2)}
+                      for tk, r in realized.items()]
+            st.dataframe(
+                pd.DataFrame(r_rows).set_index("Ticker"), width="stretch",
+                column_config={
+                    "Proceeds €":     st.column_config.NumberColumn(format="€%.2f"),
+                    "Realized P&L €": st.column_config.NumberColumn(format="€%+.2f"),
+                },
+            )
+
+    # ── Full transaction history ──────────────────────────────────────
+    with st.expander("Transaction History"):
+        _txn_rows = []
+        for tx in sorted(all_txns, key=lambda x: x["date"], reverse=True):
+            tk = tx.get("ticker", "")
+            _txn_rows.append({
+                "Date":     tx["date"],
+                "Ticker":   tk,
+                "Company":  PORTFOLIO_NAMES.get(tk, ""),
+                "Action":   tx.get("action", "buy").upper(),
+                "Shares":   round(tx.get("shares", 0), 6),
+                "Price/sh €": round(tx.get("pps", 0), 4),
+                "Total €":  round(abs(tx.get("price", 0)), 2),
+            })
+        if _txn_rows:
+            st.dataframe(pd.DataFrame(_txn_rows), width="stretch", column_config={
+                "Total €":    st.column_config.NumberColumn(format="€%.2f"),
+                "Price/sh €": st.column_config.NumberColumn(format="€%.4f"),
+            }, height=400)
 
 with tab_portfolio:
-    portfolio, summary = load_portfolio()
+    portfolio = load_portfolio_transactions()
     if portfolio is None:
         st.info("No portfolio.csv found in data/")
     else:
-        fast_scores = signals.get("fast_scores", {})
-        fundamentals = signals.get("fundamentals", {})
-        themes = signals.get("themes", [])
-
-        tot = summary["totals"]
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("Portfolio Value", f"€{tot['current_value']:,.2f}")
-        c2.metric("Invested", f"€{tot['total_invested']:,.2f}")
-        c3.metric("Unrealized P&L", f"€{tot['unrealized_pnl']:+,.2f}",
-                  delta=f"{tot['unrealized_pct']:+.1f}%",
-                  delta_color="normal")
-        c4.metric("Realized P&L", f"€{tot['realized_pnl']:+.2f}")
-        c5.metric("Total P&L", f"€{tot['total_pnl']:+,.2f}")
+        _live_portfolio()
 
         st.divider()
 
-        # ── Position table ───────────────────────────────────────────────────
-        st.markdown("#### Positions")
+        # ── STATIC section: ROI chart + quant metrics from cache ──────────────
+        port_series, bm_series, metrics, tech_cache, conc_cache = load_analytics_from_cache()
+        if port_series is None or port_series.empty:
+            st.info("Run Research to generate ROI chart and quant metrics.")
+            port_series = pd.Series(dtype=float)
+            bm_series   = {}
+            metrics     = {}
+            tech_cache  = {}
+            conc_cache  = {}
 
-        # Build display rows
-        rows = []
-        for pos in summary["positions"]:
-            tk = pos["ticker"]
-            # Try to find rating — direct match or common alias
-            score_entry = fast_scores.get(tk, {})
-            grade = score_entry.get("grade", "—")
-            score = score_entry.get("score", None)
-            # Company name: from our fundamentals or leave as ticker
-            name = fundamentals.get(tk, {}).get("name", "")
-            pnl_color = "normal"
-            rows.append({
-                "Ticker":    tk,
-                "Company":   name or tk,
-                "Shares":    pos["shares"],
-                "Avg Cost €": pos["avg_cost"],
-                "Price €":   pos["current_price"] or "—",
-                "Value €":   pos["position_value"],
-                "P&L €":     pos["unrealized_pnl"],
-                "P&L %":     pos["unrealized_pct"],
-                "Grade":     grade,
-                "Score":     int(score) if score is not None else None,
-            })
+        cache_data  = _load_analytics_cache()
+        computed_at = cache_data.get("computed_at", "")[:16].replace("T", " ") if cache_data else "—"
 
-        pos_df = pd.DataFrame(rows).set_index("Ticker")
+        # ── ROI line chart — matching Colab image ─────────────────────────────
+        st.markdown(f"#### Portfolio Return on Investment (ROI %)  <span style='color:#888;font-size:0.75em'>analytics from {computed_at}</span>",
+                    unsafe_allow_html=True)
 
-        st.dataframe(
-            pos_df,
-            width="stretch",
-            column_config={
-                "Value €":   st.column_config.NumberColumn(format="€%.2f"),
-                "P&L €":     st.column_config.NumberColumn(format="€%+.2f"),
-                "P&L %":     st.column_config.NumberColumn(format="%+.1f%%"),
-                "Avg Cost €": st.column_config.NumberColumn(format="€%.2f"),
-                "Price €":   st.column_config.NumberColumn(format="€%.2f"),
-                "Score":     st.column_config.ProgressColumn("Score", min_value=0, max_value=100, format="%d"),
-            },
-            height=380,
+        BM_COLORS = {
+            "Portfolio":        "#1f77b4",   # blue
+            "S&P 500":          "#d62728",   # red
+            "Gold":             "#ffd700",   # gold
+            "Bitcoin":          "#ff7f0e",   # orange
+            "MSCI World":       "#2ca02c",   # green
+            "Emerging Markets": "#9467bd",   # purple
+            "Fixed Income":     "#7f7f7f",   # grey
+        }
+
+        import plotly.graph_objects as go
+        fig_roi = go.Figure()
+
+        if not port_series.empty:
+            fig_roi.add_trace(go.Scatter(
+                x=port_series.index, y=port_series.values,
+                name="Portfolio", line=dict(color=BM_COLORS["Portfolio"], width=2.5),
+            ))
+
+        for bm_name, bm_s in bm_series.items():
+            if bm_s.empty:
+                continue
+            fig_roi.add_trace(go.Scatter(
+                x=bm_s.index, y=bm_s.values,
+                name=bm_name, line=dict(color=BM_COLORS.get(bm_name, "#aaa"), width=1.5),
+                opacity=0.85,
+            ))
+
+        # Final ROI annotation box (bottom-right, matches Colab)
+        final_label = f"Portfolio: {port_series.iloc[-1]:+.2f}%" if not port_series.empty else ""
+        for bm_name, bm_s in bm_series.items():
+            if not bm_s.empty:
+                final_label += f"<br>{bm_name}: {bm_s.iloc[-1]:+.2f}%"
+
+        fig_roi.add_hline(y=0, line_dash="dash", line_color="#555", line_width=1)
+        fig_roi.update_layout(
+            height=420,
+            margin=dict(t=20, b=40, l=50, r=20),
+            plot_bgcolor="rgba(10,10,20,0.6)",
+            paper_bgcolor="rgba(0,0,0,0)",
+            legend=dict(x=0.01, y=0.99, bgcolor="rgba(20,20,30,0.8)", font=dict(size=11)),
+            yaxis=dict(title="Cumulative ROI (%)", ticksuffix="%", gridcolor="#333"),
+            xaxis=dict(gridcolor="#333"),
+            hovermode="x unified",
+        )
+        _inception = cache_data.get("summary", {}).get("positions", [{}])[0].get("first_buy", "") if cache_data else ""
+        if not _inception:
+            _txns = sorted(portfolio["transactions"], key=lambda x: x["date"])
+            _inception = _txns[0]["date"] if _txns else "?"
+        st.caption(
+            f"Cash-flow matched since {_inception}: same EUR invested in each benchmark on each buy date. "
+            "USD benchmarks converted to EUR via historic EUR/USD rate."
+        )
+        st.plotly_chart(fig_roi, width="stretch", key="roi_chart")
+
+        # Final ROI summary row — Portfolio first, benchmarks sorted high→low
+        port_final = float(port_series.iloc[-1]) if not port_series.empty else 0.0
+
+        bm_ranked = sorted(
+            [(nm, float(s.iloc[-1])) for nm, s in bm_series.items() if not s.empty],
+            key=lambda x: -x[1],
         )
 
-        # ── Realized closes ──────────────────────────────────────────────────
-        realized = summary["realized_detail"]
-        if realized:
-            st.divider()
-            st.markdown("#### Closed Positions")
-            r_rows = []
-            for tk, r in realized.items():
-                r_rows.append({
-                    "Ticker": tk,
-                    "Shares Sold": r["shares_sold"],
-                    "Proceeds €": round(r["proceeds"], 2),
-                    "Realized P&L €": round(r["pnl_eur"], 2),
-                })
-            r_df = pd.DataFrame(r_rows).set_index("Ticker")
-            st.dataframe(r_df, width="stretch",
-                         column_config={
-                             "Proceeds €": st.column_config.NumberColumn(format="€%.2f"),
-                             "Realized P&L €": st.column_config.NumberColumn(format="€%+.2f"),
-                         })
+        all_items = [("Portfolio", port_final, None)] + [
+            (nm, val, round(port_final - val, 2)) for nm, val in bm_ranked
+        ]
 
-        # ── Per-position analysis ─────────────────────────────────────────────
+        roi_cols = st.columns(len(all_items))
+        for i, (nm, val, delta) in enumerate(all_items):
+            roi_cols[i].metric(
+                nm,
+                f"{val:+.2f}%",
+                delta=f"{delta:+.2f}pp" if delta is not None else None,
+                delta_color="off",
+            )
+
+        st.divider()
+
+        # ── Quant risk metrics ────────────────────────────────────────────────
+        st.markdown("#### Risk & Efficiency")
+        if metrics:
+            qc = st.columns(4)
+            qc[0].metric("Sharpe Ratio",  f"{metrics['sharpe']:.2f}",
+                         help="(Return − risk-free) / volatility, annualised. >1 = good, >2 = excellent.")
+            qc[1].metric("Sortino Ratio", f"{metrics['sortino']:.2f}",
+                         help="Like Sharpe but only penalises downside volatility.")
+            qc[2].metric("Max Drawdown",  f"{metrics['max_drawdown']:.1f}%",
+                         help="Largest peak-to-trough decline since inception.")
+            qc[3].metric("Current Drawdown", f"{metrics['current_drawdown']:.1f}%",
+                         help="Distance from all-time high to today.")
+
+            qc2 = st.columns(4)
+            qc2[0].metric("Volatility (ann.)", f"{metrics['volatility']:.1f}%",
+                          help="Annualised standard deviation of daily returns.")
+            qc2[1].metric("CAGR",     f"{metrics['cagr']:+.2f}%",
+                          help="Compound Annual Growth Rate since first purchase.")
+            qc2[2].metric("Calmar",   f"{metrics['calmar']:.2f}",
+                          help="CAGR / |Max Drawdown|. Higher = better risk-adjusted return.")
+            qc2[3].metric("Win Rate", f"{metrics['win_rate']:.1f}%",
+                          help="% of trading days with positive return.")
+
+            qc3 = st.columns(4)
+            qc3[0].metric("VaR 95%",  f"{metrics['var_95']:.2f}%",
+                          help="Worst expected daily loss 95% of the time.")
+            qc3[1].metric("CVaR 95%", f"{metrics['cvar_95']:.2f}%",
+                          help="Expected loss on the worst 5% of days (tail risk).")
+            beta_v = metrics.get("beta")
+            alpha_v = metrics.get("alpha")
+            qc3[2].metric("Beta (vs S&P 500)", f"{beta_v:.2f}" if beta_v is not None else "N/A",
+                          help="<1 = less volatile than market. >1 = more volatile.")
+            qc3[3].metric("Alpha (ann.)", f"{alpha_v:+.2f}%" if alpha_v is not None else "N/A",
+                          help="Return in excess of what your beta would predict vs S&P 500.")
+
+            qc4 = st.columns(4)
+            qc4[0].metric("Best Day",  f"{metrics['best_day']:+.2f}%")
+            qc4[1].metric("Worst Day", f"{metrics['worst_day']:+.2f}%")
+            qc4[2].metric("Trading Days", str(metrics['n_trading_days']))
+            if metrics.get("info_ratio") is not None:
+                qc4[3].metric("Info Ratio", f"{metrics['info_ratio']:.2f}",
+                              help="Alpha / tracking error vs S&P 500. >0.5 = skilled, >1 = exceptional.")
+        else:
+            st.caption("Not enough data for quant metrics.")
+
+        st.divider()
+
+        # ── Per-position deep dive ────────────────────────────────────────────
         st.divider()
         st.markdown("#### Position Analysis")
+        cached_positions = (cache_data or {}).get("summary", {}).get("positions", [])
+        pos_tickers = [p["ticker"] for p in cached_positions] if cached_positions else list(portfolio.get("holdings", {}).keys())
+
         sel_pos = st.selectbox(
             "Select position",
-            options=[p["ticker"] for p in summary["positions"]],
-            format_func=lambda t: f"{t}  —  €{next(p['position_value'] for p in summary['positions'] if p['ticker']==t):,.2f}  ({next(p['unrealized_pct'] for p in summary['positions'] if p['ticker']==t):+.1f}%)",
+            options=pos_tickers,
+            format_func=lambda t: f"{t}  {PORTFOLIO_NAMES.get(t, '')}",
         )
         if sel_pos:
-            pos = next(p for p in summary["positions"] if p["ticker"] == sel_pos)
-            sc_entry = fast_scores.get(sel_pos, {})
+            pos        = next((p for p in cached_positions if p["ticker"] == sel_pos), {})
+            rating_tk  = RATING_LOOKUP.get(sel_pos, sel_pos)
+            sc_entry   = _port_fast_scores.get(rating_tk, {})
+            tech       = (tech_cache or {}).get(sel_pos, {})
+            disp_name  = PORTFOLIO_NAMES.get(sel_pos) or _port_fundamentals.get(rating_tk, {}).get("name", "")
 
             col_l, col_r = st.columns([1, 2])
             with col_l:
-                st.markdown(f"**{sel_pos}**")
-                st.markdown(f"Shares: {pos['shares']:.4f}")
-                st.markdown(f"Avg cost: €{pos['avg_cost']:.2f}")
-                st.markdown(f"Current: €{pos['current_price'] or '—'}")
-                st.markdown(f"Position value: €{pos['position_value']:,.2f}")
-                st.markdown(f"P&L: €{pos['unrealized_pnl']:+.2f} ({pos['unrealized_pct']:+.1f}%)")
-                st.markdown(f"First bought: {pos['first_buy']}")
+                st.markdown(f"**{sel_pos}**" + (f"  {disp_name}" if disp_name else ""))
+                if rating_tk != sel_pos:
+                    st.caption(f"Rated via {rating_tk}")
+                if pos:
+                    st.markdown(f"Shares: {pos.get('shares', 0):.4f}  |  Avg cost: €{pos.get('avg_cost', 0):.2f}")
+                    cur_px = pos.get("current_price") or pos.get("avg_cost", 0)
+                    st.markdown(f"Current: €{cur_px:.4f}  |  Value: €{pos.get('position_value', 0):,.2f}")
+                    st.markdown(f"P&L: €{pos.get('unrealized_pnl', 0):+.2f} ({pos.get('unrealized_pct', 0):+.1f}%)")
+                    st.markdown(f"First bought: {pos.get('first_buy', '—')}")
                 if sc_entry:
-                    badge_color = GRADE_COLOR.get(sc_entry.get("grade",""), "#888")
+                    badge_color = GRADE_COLOR.get(sc_entry.get("grade", ""), "#888")
                     st.markdown(
-                        f"Rating: <span style='background:{badge_color};color:#000;padding:2px 8px;border-radius:3px;font-weight:bold'>"
-                        f"{sc_entry.get('grade','—')}</span>  Score: {sc_entry.get('score','—')}",
+                        f"Rating: <span style='background:{badge_color};color:#000;padding:2px 8px;"
+                        f"border-radius:3px;font-weight:bold'>{sc_entry.get('grade','—')}</span>"
+                        f"  Score: {sc_entry.get('score','—')}",
                         unsafe_allow_html=True,
                     )
 
+                # Technicals panel
+                if tech:
+                    st.markdown("---")
+                    st.markdown("**Technicals**")
+                    rsi = tech.get("rsi")
+                    rsi_sig = tech.get("rsi_signal", "")
+                    rsi_color = "#e84118" if rsi_sig == "OVERBOUGHT" else ("#1db954" if rsi_sig == "OVERSOLD" else "#888")
+                    if rsi:
+                        st.markdown(
+                            f"RSI-14: <span style='color:{rsi_color};font-weight:bold'>{rsi:.1f} {rsi_sig}</span>",
+                            unsafe_allow_html=True,
+                        )
+                    ma_sig = tech.get("ma_signal", "")
+                    ma_color = "#1db954" if "BULL" in ma_sig else ("#e84118" if "BEAR" in ma_sig else "#f39c12")
+                    st.markdown(
+                        f"MA50/200: <span style='color:{ma_color};font-weight:bold'>{ma_sig}</span>"
+                        + (f" (MA50={tech['ma50']:.2f})" if tech.get('ma50') else ""),
+                        unsafe_allow_html=True
+                    )
+                    m1, m3, m6 = tech.get("mom_1m"), tech.get("mom_3m"), tech.get("mom_6m")
+                    if m1 is not None:
+                        st.markdown(f"Momentum: 1M {m1:+.1f}%  ·  3M {m3:+.1f}%  ·  6M {m6:+.1f}%")
+                    h52 = tech.get("pct_from_52w_high")
+                    l52 = tech.get("pct_from_52w_low")
+                    if h52 is not None:
+                        st.markdown(f"52W High: {h52:+.1f}%  ·  52W Low: {l52:+.1f}%")
+
             with col_r:
                 if sc_entry:
-                    sector = sc_entry.get("sector", "")
-                    asset_type = sc_entry.get("type", "stock")
-                    _render_deep_dive(sel_pos, sc_entry.get("score", 0), sc_entry.get("grade", "?"),
-                                      sector, asset_type, signals)
+                    _render_deep_dive(
+                        rating_tk, sc_entry.get("score", 0), sc_entry.get("grade", "?"),
+                        sc_entry.get("sector", ""), sc_entry.get("type", "stock"),
+                        signals, display_ticker=sel_pos,
+                    )
                 else:
-                    st.info(f"{sel_pos} not in our rated universe — no signal breakdown available.")
-
-                    # Show relevant themes even without score
-                    matched_themes = [t for t in themes if sel_pos in t.get("key_tickers", [])]
+                    st.info(f"{sel_pos} ({rating_tk}) not in rated universe.")
+                    matched_themes = [
+                        t for t in themes
+                        if sel_pos in t.get("key_tickers", []) or rating_tk in t.get("key_tickers", [])
+                    ]
                     if matched_themes:
                         st.markdown("**Relevant Themes:**")
                         for t in matched_themes:
-                            st.markdown(f"- {t['label']}: composite {t['composite']:.0f}/100")
+                            st.markdown(f"- {t['label']}: {t['composite']:.0f}/100")
+
+        # ── Correlation matrix ───────────────────────────────────────────────
+        st.divider()
+        st.markdown("#### Return Correlation (1Y)")
+        _corr_data = (cache_data or {}).get("correlation", {})
+        if _corr_data:
+            _tickers_corr = list(_corr_data.keys())
+            _labels = [PORTFOLIO_NAMES.get(t, t).split(" ")[0] + f"\n({t})" for t in _tickers_corr]
+            _z = [[_corr_data[r].get(c, None) for c in _tickers_corr] for r in _tickers_corr]
+            _text = [[f"{_corr_data[r].get(c, 0):.2f}" if _corr_data[r].get(c) is not None else ""
+                      for c in _tickers_corr] for r in _tickers_corr]
+
+            _cfig = go.Figure(go.Heatmap(
+                z=_z, x=_tickers_corr, y=_tickers_corr,
+                text=_text, texttemplate="%{text}",
+                colorscale=[
+                    [0.0, "#d62728"], [0.5, "#1a1a2e"], [1.0, "#2196F3"]
+                ],
+                zmin=-1, zmax=1,
+                showscale=True,
+                colorbar=dict(thickness=12, len=0.8, title="ρ"),
+                hovertemplate="<b>%{y} vs %{x}</b><br>ρ = %{z:.3f}<extra></extra>",
+            ))
+            n = len(_tickers_corr)
+            _cfig.update_layout(
+                height=max(320, n * 45),
+                margin=dict(t=10, b=60, l=80, r=40),
+                plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                xaxis=dict(tickangle=-35, tickfont=dict(size=11)),
+                yaxis=dict(tickfont=dict(size=11)),
+            )
+            st.plotly_chart(_cfig, width="stretch", key="corr_heatmap")
+            st.caption(
+                "Pearson correlation of daily returns over 1 year. "
+                "ρ=1: move together. ρ=-1: move opposite. ρ≈0: uncorrelated. "
+                "High correlation between positions = less diversification benefit."
+            )
+        else:
+            st.caption("Run Research to compute correlation matrix.")
 
 # ═══════════════════════════════════════════════════════
+# ── Research ─────────────────────────────────────────────────────────────────
+with tab_research:
+    # ── Control panel ────────────────────────────────────────────────────────
+    with st.container():
+        ctrl_col, info_col = st.columns([2, 5])
+        with ctrl_col:
+            if running:
+                st.button("Research Running…", disabled=True)
+                if st.button("Refresh status"):
+                    st.rerun()
+            else:
+                b1, b2 = st.columns(2)
+                if b1.button("Run Research (fast)", type="primary", help="~5 min · 50 priority tickers"):
+                    _start_collect(fast=True)
+                    st.rerun()
+                if b2.button("Run Full Research", help="~45 min · all 882 assets"):
+                    _start_collect(fast=False)
+                    st.rerun()
+        with info_col:
+            if running:
+                elapsed = ""
+                try:
+                    started = datetime.fromisoformat(status.get("started_at", ""))
+                    elapsed = f" · {int((datetime.now()-started).total_seconds()//60)}m elapsed"
+                except Exception:
+                    pass
+                st.info(f"Collecting data{elapsed}… page will refresh when done.")
+                if COLLECT_LOG.exists():
+                    lines = COLLECT_LOG.read_text().strip().split("\n")
+                    last = next((l for l in reversed(lines) if l.strip()), "")
+                    if last:
+                        st.caption(f"Last: {last}")
+            else:
+                n_assets = signals.get("universe_size", "?")
+                finished = status.get("finished_at", "")
+                fin_str = f" · finished {finished[:16].replace('T',' ')}" if finished else ""
+                st.caption(f"Last data: {collected_at[:16].replace('T',' ')}  ·  {n_assets} assets{fin_str}")
+
+    st.markdown("")
+
+    # ── World View ───────────────────────────────────────────────────────────
+    st.markdown("## World View")
+    _regime_desc = {
+        "growth":      "GDP expanding, earnings growing, risk assets outperforming. Favours cyclicals: Technology, Consumer Discretionary, Financials.",
+        "inflation":   "Prices rising faster than growth. Hard assets and commodities outperform. Favours Energy, Materials, short-duration assets.",
+        "stagflation": "Slow growth + high inflation. Worst combo for equities. Defensives (Staples, Healthcare, Utilities) and commodities preferred.",
+        "deflation":   "Falling prices, weak demand. Bonds outperform. Defensives and dividend stocks hold value; avoid cyclicals.",
+        "recession":   "Economic contraction. Earnings falling broadly. Capital preservation priority; Staples, Utilities, Healthcare, cash.",
+    }
+    _risk_desc = {
+        "low":    "Low volatility, tight credit spreads, strong momentum. Risk assets broadly supported.",
+        "medium": "Mixed signals — some caution warranted. Selective positioning; favour quality over momentum.",
+        "high":   "Elevated uncertainty. Credit spreads widening, volatility rising. Reduce cyclical exposure, increase defensives.",
+    }
+    m1, m2, m3, m4, m5, m6 = st.columns(6)
+    m1.metric("Macro Regime", world["regime"].title(),
+              help=_regime_desc.get(world["regime"], "Current macroeconomic regime derived from FRED indicators: Fed funds rate, CPI trend, yield curve, GDP growth."))
+    m2.metric("Risk Level", world["risk_level"].upper(),
+              help=_risk_desc.get(world["risk_level"], "Composite risk assessment combining regime uncertainty, credit spreads, and VIX level."))
+    vix = world.get("vix")
+    m3.metric("VIX", f"{vix:.1f}  {world['vix_regime'].replace('_',' ')}" if vix else "N/A",
+              help=(
+                  "CBOE Volatility Index — measures 30-day implied volatility of S&P 500 options. "
+                  "Below 15: complacency. 15-20: calm. 20-25: elevated. 25-30: fear. Above 30: extreme fear. "
+                  f"Current 1Y range: {world.get('vix_1y_low','?')} – {world.get('vix_1y_high','?')}."
+              ))
+    fg = world.get("fg_score")
+    m4.metric("Fear / Greed", f"{fg:.0f}  {world['fg_rating'].replace('_',' ').title()}" if fg else "N/A",
+              help=(
+                  "CNN Fear & Greed Index (0–100). Aggregates 7 signals: market momentum, stock price strength, "
+                  "stock price breadth, put/call ratio, junk bond demand, market volatility, safe haven demand. "
+                  "0–25: Extreme Fear. 25–45: Fear. 45–55: Neutral. 55–75: Greed. 75–100: Extreme Greed. "
+                  "Contrarian signal: extreme greed often precedes corrections."
+              ))
+    m5.metric("Credit Spreads", world["spread_regime"].title() or "N/A",
+              help=(
+                  "HYG/LQD spread proxy — measures the difference in returns between high-yield (HYG) and "
+                  "investment-grade (LQD) bonds. Widening spreads signal rising default risk and credit stress, "
+                  "typically a leading indicator of equity market weakness. Tightening = risk appetite improving."
+              ))
+    m6.metric("Liquidity Signal", world["btc_regime"].replace("_", " ").title() or "N/A",
+              help=(
+                  "Bitcoin vs Gold relative performance as a liquidity proxy. "
+                  "Risk-On: BTC outperforming Gold — institutional risk appetite elevated, growth assets supported. "
+                  "Safe-Haven: Gold outperforming BTC — flight to quality, defensive rotation likely. "
+                  "Risk-Off: both falling — broad liquidity withdrawal."
+              ))
+    st.divider()
+    col_ev, col_right = st.columns([3, 1])
+    with col_ev:
+        st.markdown("#### Key Events and Market Interactions")
+        for item in world["interactions"]:
+            st.markdown(f"**{item['title']}**")
+            for chain in item["chains"]:
+                st.markdown(chain)
+            st.markdown("---")
+    with col_right:
+        themes = signals.get("themes", [])
+        retail = signals.get("retail_trend", {})
+        st.markdown("#### Market Themes")
+        st.caption("Score = news 35% + WSB 25% + Polymarket 25% + macro 15%")
+        if themes:
+            for t in themes[:8]:
+                comp = t["composite"]
+                if comp < 5:
+                    continue
+                bar_n = int(min(comp, 50) / 50 * 10)
+                bar = "█" * bar_n + "░" * (10 - bar_n)
+                sources = []
+                if t["news_score"] > 5:  sources.append(f"News {t['news_score']:.0f}")
+                if t["wsb_score"] > 10:  sources.append(f"WSB {t['wsb_score']:.0f}")
+                if t["poly_score"] > 5:  sources.append(f"Poly {t['poly_score']:.0f}")
+                src_str = " · ".join(sources) if sources else "low signal"
+                st.markdown(f"`{bar}` **{t['label']}** {comp:.0f}  \n<span style='color:#888;font-size:0.78em'>{src_str}</span>", unsafe_allow_html=True)
+        st.markdown("")
+        if retail:
+            direction = retail.get("trend_direction", "mixed")
+            dir_label = {"risk_on": "RISK ON", "defensive": "DEFENSIVE", "mixed": "MIXED"}.get(direction, direction.upper())
+            st.markdown(f"**Retail: {dir_label}**")
+            st.caption(retail.get("narrative", ""))
+        st.markdown("")
+        st.markdown("**Sector Outlook**")
+        for s in world["tailwinds"][:3]:
+            st.markdown(f"+ {s}")
+        for s in world["headwinds"][:3]:
+            st.markdown(f"- {s}")
+    st.divider()
+
+    tab_ratings, tab_signals, tab_events, tab_news = st.tabs(
+        ["Ratings", "Macro Signals", "Events", "News"]
+    )
+
 # TAB 2 — RATINGS
 # ═══════════════════════════════════════════════════════
 with tab_ratings:
@@ -1026,6 +1631,42 @@ with tab_ratings:
         col2.metric("Investment Grade (≥BBB-)", int((df["GradeRank"] >= GRADE_RANK["BBB-"]).sum()))
         col3.metric("Top Score", int(df["Score"].max()))
         col4.metric("Mean Score", f"{df['Score'].mean():.1f}")
+
+        st.divider()
+
+        with st.expander("ℹ️ How Ratings Work & Why 60+ is a Buy", expanded=False):
+            st.markdown("""
+            ### Why invest in 60+ rated companies?
+            A score of **60 or above** translates to a **BUY** or **STRONG BUY** rating. These are high-conviction assets that have aligned fundamental strength, positive macro tailwinds, and favorable institutional positioning. Prioritizing 60+ rated companies ensures you are investing with the trend, minimizing exposure to downside macro shocks, and holding assets with a statistical margin of safety.
+
+            ### How is the Rating Calculated?
+            The 0-100 score is a dynamic composite synthesized from multiple live sources:
+            * **Earnings / Analyst Consensus (22%)**: Assesses upside potential, revenue growth, and ROE (Source: `yfinance`).
+            * **Insider Flow (18%)**: Tracks net insider buying vs. selling over 90 days (Source: SEC filings).
+            * **Momentum (15%)**: Measures 1M/3M/6M relative strength and moving average trends.
+            * **Fundamentals (15%)**: Evaluates P/E ratios, free cash flow, and debt-to-equity levels.
+            * **Macro Regime (12%)**: Adjusts for the current growth/inflation cycle and FRED indicators.
+            * **Geopolitical Events (10%)**: Prices in binary event risks like elections or conflicts (Source: Polymarket, GDELT).
+            * **Options Flow (5%)**: Analyzes the Put-Call Ratio to gauge institutional sentiment.
+            * **WSB / Short Interest (3%)**: Evaluates retail sentiment and short-squeeze potential.
+
+            ### Event Probabilities: When is it a Buy or Sell?
+            The system continuously monitors real-time event probabilities. A stock becomes a **BUY** (score bump) or **SELL/HOLD** (score penalty) based on sector-specific rules:
+            * **FOMC Rate Cuts**: High probability of cuts = **BUY** for Tech (multiple expansion) and Real Estate; **HOLD/SELL** for Banks (NIM compression).
+            * **Geopolitical Conflict**: Escalation probability >15% = **BUY** for Energy and Defense; **SELL** for Consumer Discretionary (due to inflation/logistics pressure).
+            * **Recession Risk**: If prediction markets price a recession >15% = **BUY** for Defensives (Utilities, Staples, Healthcare); **SELL** for Cyclicals (Materials, Financials).
+
+            ### Pros & Cons of the Rating System
+            **Pros:**
+            * **Data-Driven & Emotionless**: Removes human bias by relying strictly on quantitative and probabilistic data.
+            * **Forward-Looking**: Incorporates prediction markets to price in binary risks *before* they happen, rather than lagging indicators.
+            * **Holistic**: Combines deep fundamental valuation with short-term options and momentum flows.
+
+            **Cons:**
+            * **Volatility**: Prediction markets can be highly volatile, causing slight score fluctuations week-to-week.
+            * **Consensus Lag**: Analyst ratings (22% weight) often lag rapid structural market changes.
+            * **Priced-in Risk**: High-scoring (60+) companies are often well-known winners, meaning their immediate upside might already be fully priced in by the market.
+            """)
 
         st.divider()
 
@@ -1047,9 +1688,19 @@ with tab_ratings:
 
         # Add company name column for display
         fundamentals = signals.get("fundamentals", {})
+        _universe_names: dict[str, str] = {}
+        try:
+            import csv as _csv
+            with open(DATA_DIR / "universe.csv") as _uf:
+                for _row in _csv.DictReader(_uf):
+                    if _row.get("yf_ticker") and _row.get("name"):
+                        _universe_names[_row["yf_ticker"]] = _row["name"]
+        except Exception:
+            pass
         filtered = filtered.copy()
         filtered["Company"] = filtered["Ticker"].map(
-            lambda t: fundamentals.get(t, {}).get("name", "") or ""
+            lambda t: fundamentals.get(t, {}).get("name", "")
+                      or _universe_names.get(t, "")
         )
 
         display_df = filtered[["Ticker", "Company", "Grade", "Score", "Sector", "Type", "Region"]].copy()

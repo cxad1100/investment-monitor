@@ -20,12 +20,16 @@ def fetch_btc_signal(period: str = "3mo") -> dict:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         try:
-            btc_hist = yf.Ticker("BTC-USD").history(period=period)["Close"].dropna()
+            btc_hist  = yf.Ticker("BTC-USD").history(period=period)["Close"].dropna()
             gold_hist = yf.Ticker("GC=F").history(period=period)["Close"].dropna()
-            spy_hist = yf.Ticker("SPY").history(period=period)["Close"].dropna()
+            spy_hist  = yf.Ticker("SPY").history(period=period)["Close"].dropna()
         except Exception as e:
             return {"error": str(e), "regime": "neutral", "liquidity_signal": "neutral",
                     "btc_price": 0, "interpretation": "Data fetch failed"}
+
+        if btc_hist.empty or gold_hist.empty:
+            return {"regime": "neutral", "liquidity_signal": "neutral",
+                    "btc_price": 0, "interpretation": "No price data available"}
 
         def pct_change(series, n):
             if len(series) < n + 1:

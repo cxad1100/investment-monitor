@@ -48,22 +48,22 @@ def compute_momentum_score(ticker: str, sector: str, themes: list[dict]) -> floa
 
     Aggregates news + WSB + Polymarket interest for the stock's sector/ticker.
     High score = strong multi-source attention (AI hype, energy geopolitics, etc.).
+    No theme signal → 30 (mild negative, not neutral, to spread distribution).
     """
     if not themes:
-        return 50.0
+        return 30.0
 
     best = 0.0
     for t in themes:
         if sector in t.get("sectors", []) or ticker in t.get("key_tickers", []):
             best = max(best, t.get("composite", 0.0))
 
-    # Normalise: themes max out around 40-60 in practice; rescale to 0-100
-    # Raw composite > 30 is strong, > 15 is moderate, < 5 is no signal
+    # Raw composite > 30 is strong, 15-30 is moderate, < 15 is weak
     if best >= 30:
-        return min(100.0, 50.0 + (best - 30) * 2.5)
+        return min(100.0, 55.0 + (best - 30) * 2.5)
     if best >= 15:
-        return 50.0 + (best - 15) * 0.0   # neutral band
-    return max(0.0, 50.0 - (15 - best) * 1.5)
+        return 40.0 + (best - 15) * 1.0
+    return max(10.0, 30.0 + best * 0.67)
 
 
 def compute_geo_score(ticker: str, asset_meta: dict, events: list[dict]) -> float:
@@ -197,6 +197,19 @@ def score_all_assets(signals: dict) -> dict[str, dict]:
         s_wsb       = compute_wsb_short_score(s_data, w_data)
         s_momentum  = compute_momentum_score(ticker, sector, themes)
 
+        # Count real signals (non-default data sources)
+        _sig_flags = [
+            bool(f_data.get("analyst_score") is not None),          # analyst coverage
+            bool(i_data.get("net_buy_pct_mktcap", 0.0) != 0.0),    # insider activity
+            bool(f_data.get("pe_ratio") or f_data.get("return_on_equity")),  # fundamentals
+            bool(p_data and "error" not in p_data and p_data.get("return_1y") is not None),  # price
+            bool(o_data.get("put_call_ratio") is not None),         # options
+            bool(isinstance(w_data, dict) and w_data.get("mentions_7d", 0) > 0),  # WSB
+            bool(s_momentum > 30.0),                                # theme signal
+        ]
+        signal_count = sum(_sig_flags)
+        no_signal = signal_count <= 1  # score is almost entirely defaults
+
         # Weights: Earnings 22% | Insider 18% | Macro 12% | Geo 10% |
         #          Fundamentals 15% | Options 5% | WSB 3% | Momentum 15%
         composite = max(0, min(100, round(
@@ -216,6 +229,8 @@ def score_all_assets(signals: dict) -> dict[str, dict]:
             "sector": sector,
             "region": asset_meta.get("region", ""),
             "type": asset_meta.get("type", "stock"),
+            "no_signal": no_signal,
+            "signal_count": signal_count,
             "sub_scores": {
                 "earnings":   s_earnings,
                 "insider":    s_insider,
@@ -227,6 +242,22 @@ def score_all_assets(signals: dict) -> dict[str, dict]:
                 "momentum":   s_momentum,
             },
         }
+
+    # Stretch scores to use full 0-100 range.
+    # Without this, averaging 8 signals compresses everything to 40-65.
+    # Use 5th/95th percentile as anchors to avoid outlier distortion.
+    if len(results) >= 10:
+        raw_scores = sorted(v["score"] for v in results.values())
+        n = len(raw_scores)
+        p5  = raw_scores[max(0, int(n * 0.05))]
+        p95 = raw_scores[min(n - 1, int(n * 0.95))]
+        span = max(1, p95 - p5)
+        for ticker in results:
+            raw = results[ticker]["score"]
+            stretched = max(0, min(100, round((raw - p5) / span * 100)))
+            results[ticker]["score"] = stretched
+            results[ticker]["grade"] = score_to_grade(stretched)
+
     return results
 
 
@@ -234,9 +265,9 @@ def score_to_grade(score: int) -> str:
     """Convert composite score to S&P-style letter grade."""
     thresholds = [
         (90, "AAA"), (83, "AA+"), (77, "AA"), (71, "AA-"),
-        (65, "A+"), (59, "A"), (53, "A-"), (47, "BBB+"),
-        (41, "BBB"), (35, "BBB-"), (29, "BB+"), (23, "BB"),
-        (17, "BB-"), (12, "B"), (6, "CCC"),
+        (65, "A+"), (62, "A"), (59, "A-"), (56, "BBB+"),
+        (53, "BBB"), (50, "BBB-"), (47, "BB+"), (43, "BB"),
+        (37, "BB-"), (30, "B"), (20, "CCC"),
     ]
     for threshold, grade in thresholds:
         if score >= threshold:
