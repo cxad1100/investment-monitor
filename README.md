@@ -5,8 +5,8 @@ Investment dashboard. Collects signals from 13 sources, scores every asset, and 
 ## Setup
 
 ```bash
-git clone https://github.com/cxad1100/claudecode-a.git
-cd claudecode-a
+git clone https://github.com/cxad1100/investment-monitor.git
+cd investment-monitor
 uv venv .venv --python 3.13 && uv pip install -r requirements.txt --python .venv
 source .venv/bin/activate
 ```
