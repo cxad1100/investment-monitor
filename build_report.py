@@ -31,9 +31,13 @@ from tools.portfolio_analytics import (
 from tools.portfolio_tools import TICKER_MAP
 from tools.optimizer import (
     fetch_price_history,
+    fetch_market_caps,
     to_returns,
     annualize,
     optimize,
+    risk_parity,
+    risk_contributions,
+    black_litterman,
     max_return_at_vol,
     efficient_frontier,
     random_portfolios,
@@ -42,12 +46,17 @@ from tools.optimizer import (
     equity_to_roi,
 )
 
-# ── Optimizer settings (one place) ────────────────────────────────────────────
-LOOKBACK_DAYS = 365      # estimation window for expected returns / covariance
+# ── Settings (one place) ──────────────────────────────────────────────────────
+LOOKBACK_DAYS = 365      # window for the COVARIANCE estimate (the trustworthy input)
 RF            = 0.045    # risk-free rate (annual)
 LONG_ONLY     = True
 MAX_W         = 0.35     # max single-position weight
 REB_FREQ      = "M"      # backtest rebalance frequency
+BL_DELTA      = 2.5      # Black-Litterman market risk-aversion (standard ≈ 2.5)
+BL_TAU        = 0.05     # Black-Litterman prior uncertainty scale
+# Optional subjective views for Black-Litterman. Empty = pure market-implied.
+# Example: [{"assets": {"NVD.F": 1}, "ret": 0.12, "confidence": 0.5}]
+BL_VIEWS: list[dict] = []
 
 ROOT = Path(__file__).parent
 
@@ -95,13 +104,28 @@ def gather() -> dict:
     val = {p["ticker"]: p["position_value"] for p in positions}
     tot_val = sum(val[t] for t in universe) or 1.0
     cur_w = np.array([val[t] / tot_val for t in universe])
-    cur_ret, cur_vol, cur_sharpe = portfolio_perf(cur_w, mu, sig, RF)
+
+    # ── Market-cap weights → Black-Litterman implied returns (the return model) ──
+    caps = fetch_market_caps(universe)
+    cap_vec = np.array([caps.get(t, val[t]) for t in universe])   # ETF/missing → position value
+    mkt_w = cap_vec / cap_vec.sum()
+    pi = black_litterman(cov_ann, mkt_w, delta=BL_DELTA, tau=BL_TAU, views=BL_VIEWS)
+    mean_bl = RF + pi                       # total expected return = rf + implied excess
+    mu_bl = mean_bl.values
+
+    cur_ret, cur_vol, cur_sharpe = portfolio_perf(cur_w, mu_bl, sig, RF)
+    cur_rc = risk_contributions(cur_w, cov_ann)
 
     kw = dict(long_only=LONG_ONLY, max_w=MAX_W)
-    w_sharpe = optimize(mean_ann, cov_ann, objective="sharpe", rf=RF, **kw)
-    w_same_risk = max_return_at_vol(mean_ann, cov_ann, cur_vol, **kw)
-    frontier = efficient_frontier(mean_ann, cov_ann, n_points=40, **kw)
-    cloud = random_portfolios(mean_ann, cov_ann, n=2500, rf=RF)
+    # Covariance-only (no return forecast)
+    w_minvar = optimize(mean_ann, cov_ann, objective="min_var", rf=RF, **kw)
+    w_rp     = risk_parity(cov_ann, max_w=MAX_W)
+    # Black-Litterman return-based
+    w_bl_sharpe = optimize(mean_bl, cov_ann, objective="sharpe", rf=RF, **kw)
+    w_bl_same   = max_return_at_vol(mean_bl, cov_ann, cur_vol, **kw)
+
+    frontier = efficient_frontier(mean_bl, cov_ann, n_points=40, **kw)
+    cloud = random_portfolios(mean_bl, cov_ann, n=2500, rf=RF)
 
     backtest = rolling_backtest(hist[universe], lookback_days=LOOKBACK_DAYS,
                                 rebalance_freq=REB_FREQ, objective="sharpe",
@@ -119,11 +143,12 @@ def gather() -> dict:
 
     return dict(positions=positions, summary=summary, deployed=deployed, txns=txns,
                 roi_series=roi_series, bm_series=bm_series, metrics=metrics,
-                correlation=correlation, universe=universe, mu=mu, sig=sig,
-                mean_ann=mean_ann, cov_ann=cov_ann, cur_w=cur_w, tot_val=tot_val,
-                cur_perf=(cur_ret, cur_vol, cur_sharpe), w_sharpe=w_sharpe,
-                w_same_risk=w_same_risk, frontier=frontier, cloud=cloud,
-                backtest=backtest, ytd=ytd)
+                correlation=correlation, universe=universe, sig=sig,
+                cov_ann=cov_ann, cur_w=cur_w, tot_val=tot_val, mkt_w=mkt_w,
+                mu_bl=mu_bl, pi=pi.values, cur_rc=cur_rc,
+                cur_perf=(cur_ret, cur_vol, cur_sharpe),
+                w_minvar=w_minvar, w_rp=w_rp, w_bl_sharpe=w_bl_sharpe, w_bl_same=w_bl_same,
+                frontier=frontier, cloud=cloud, backtest=backtest, ytd=ytd)
 
 
 # ── Sections ──────────────────────────────────────────────────────────────────
@@ -148,76 +173,107 @@ def sec_summary(d: dict, public: bool) -> str:
 
 
 def sec_weights_now(d: dict, public: bool) -> str:
-    """The actionable section: what weights to use today, two options, and why."""
+    """The actionable core: four portfolios, none relying on trailing-mean returns."""
     universe, cur_w = d["universe"], d["cur_w"]
-    mu, sig = d["mu"], d["sig"]
+    mu_bl, sig = d["mu_bl"], d["sig"]
     cur_ret, cur_vol, cur_sharpe = d["cur_perf"]
     out = ["<h2>Weights to use now</h2>"]
 
     out.append(f"""
 <div class="note">
-<b>Why change anything?</b> Your current mix is a point <i>below</i> the efficient frontier:
-for the risk you are already taking ({cur_vol*100:.1f}% annual volatility), a different mix of the
-<i>same assets</i> has historically offered more expected return. Both options below only re-weight
-what you already own — no new assets, long-only, max {MAX_W:.0%} per position.
+None of these use trailing returns as a forecast (that's the part that doesn't work).
+The two <b>robust</b> portfolios use only the <b>covariance matrix</b> — how your assets move
+together — which is statistically stable. The two <b>Black-Litterman</b> portfolios get expected
+returns from <b>market-cap weights</b> (what the market collectively bets), not from your assets'
+recent winning streaks. All are long-only, max {MAX_W:.0%} per position, weights sum to 100%.
 </div>""")
 
-    rows_head = ("<tr><th>Ticker</th><th>Name</th><th class='num'>Current</th>"
-                 "<th class='num'>A · Max Sharpe</th><th class='num'>B · Same-risk max-return</th>"
-                 + ("<th class='num'>A: € to shift</th>" if not public else "") + "</tr>")
+    cols = [("Min-Var", d["w_minvar"]), ("Risk-Parity", d["w_rp"]),
+            ("BL Max-Sharpe", d["w_bl_sharpe"]), ("BL Same-Risk", d["w_bl_same"])]
+    head = "<tr><th>Ticker</th><th>Name</th><th class='num'>Current</th>" + \
+        "".join(f"<th class='num'>{c[0]}</th>" for c in cols) + \
+        ("<th class='num'>Mkt-cap</th>" if True else "") + "</tr>"
     rows = []
     for i, t in enumerate(universe):
-        wa = d["w_sharpe"][i] if d["w_sharpe"] is not None else None
-        wb = d["w_same_risk"][i] if d["w_same_risk"] is not None else None
-        shift = ""
-        if not public and wa is not None:
-            eur = (wa - cur_w[i]) * d["tot_val"]
-            cls = "pos" if eur > 0 else "neg"
-            shift = f'<td class="num"><span class="{cls} mono">€{eur:+,.0f}</span></td>'
-        wa_cell = f"<td class='num mono'>{wa*100:.1f}%</td>" if wa is not None else "<td class='num'>—</td>"
-        wb_cell = f"<td class='num mono'>{wb*100:.1f}%</td>" if wb is not None else "<td class='num'>—</td>"
-        rows.append(
-            f"<tr><td class='mono'>{t}</td><td>{NAMES.get(t, t)}</td>"
-            f"<td class='num mono'>{cur_w[i]*100:.1f}%</td>{wa_cell}{wb_cell}{shift}</tr>"
-        )
-    out.append(f"<table>{rows_head}{''.join(rows)}</table>")
+        cells = f"<td class='num mono'>{cur_w[i]*100:.1f}%</td>"
+        for _, w in cols:
+            cells += (f"<td class='num mono'>{w[i]*100:.1f}%</td>" if w is not None
+                      else "<td class='num'>—</td>")
+        cells += f"<td class='num mono dim'>{d['mkt_w'][i]*100:.1f}%</td>"
+        rows.append(f"<tr><td class='mono'>{t}</td><td>{NAMES.get(t, t)}</td>{cells}</tr>")
+    out.append(f"<table>{head}{''.join(rows)}</table>")
 
-    def perf_cards(w, label):
+    def perf_cards(w, label, desc, eur=False):
         if w is None:
-            return f"<div class='note warn'>{label}: no feasible solution under constraints.</div>"
-        r, v, s = portfolio_perf(w, mu, sig, RF)
-        return (f"<h3>{label}</h3><div class='cards'>"
-                + _card("Expected return", _pct(r * 100))
+            return f"<div class='note warn'><b>{label}</b>: no feasible solution under constraints.</div>"
+        w = np.asarray(w)
+        r, v, s = portfolio_perf(w, mu_bl, sig, RF)
+        shift = ""
+        if eur and not public:
+            biggest = sorted(((w[i] - cur_w[i]) * d["tot_val"], universe[i]) for i in range(len(universe)))
+            up = [f"{tk} €{e:+,.0f}" for e, tk in biggest[-2:][::-1] if e > 1]
+            dn = [f"{tk} €{e:+,.0f}" for e, tk in biggest[:2] if e < -1]
+            if up or dn:
+                shift = "<div class='dim mono' style='margin-top:6px'>shift: " + ", ".join(up + dn) + "</div>"
+        return (f"<h3>{label}</h3><p class='dim'>{desc}</p><div class='cards'>"
                 + _card("Volatility", _pct(v * 100, signed=False))
-                + _card("Sharpe", f"{s:.2f}")
-                + _card("vs current", _pct((r - cur_ret) * 100) + " return, "
-                        + _pct((v - cur_vol) * 100) + " vol")
-                + "</div>")
+                + _card("vs current vol", _pct((v - cur_vol) * 100))
+                + _card("Exp. return*", _pct(r * 100))
+                + _card("Sharpe*", f"{s:.2f}")
+                + "</div>" + shift)
 
-    out.append(perf_cards(np.array(cur_w), "Current portfolio"))
-    out.append(perf_cards(d["w_sharpe"], "Option A — Max Sharpe (best return per unit of risk)"))
-    out.append(perf_cards(d["w_same_risk"], "Option B — Same risk as now, maximum expected return"))
+    out.append("<h3 style='color:#6a9955'>Robust — no return forecast (covariance only)</h3>")
+    out.append(perf_cards(d["w_minvar"], "Minimum Variance",
+                          "The single lowest-risk mix of your assets. The most reliable output of "
+                          "the whole method — depends on nothing but the covariance matrix.", eur=True))
+    out.append(perf_cards(d["w_rp"], "Risk Parity (Equal Risk Contribution)",
+                          "Every asset contributes the same share of total portfolio risk — no single "
+                          "name dominates your risk. The institutional answer to 'I don't trust return "
+                          "forecasts'.", eur=True))
 
-    out.append("""
-<div class="note">
-<b>Which to pick?</b>
-<b>A (Max Sharpe)</b> is the textbook optimum — the mix with the highest expected
-return <i>per unit of risk</i>. Its overall volatility may differ from yours today.
-<b>B (Same-risk)</b> keeps your exact current volatility and just slides you up to
-the frontier — a pure upgrade if you are comfortable with today's swings.
-If A's volatility is close to yours, the two converge to the same point.
-</div>
+    out.append("<h3 style='color:#569cd6'>Black-Litterman — market-implied returns</h3>")
+    out.append(perf_cards(d["w_bl_sharpe"], "BL Max-Sharpe",
+                          "Highest return per unit of risk, where 'return' is what the market implies "
+                          "from cap weights (δ·Σ·w_market), not your holdings' past performance.", eur=True))
+    out.append(perf_cards(d["w_bl_same"], "BL Same-Risk Max-Return",
+                          "Keeps your current volatility exactly; maximizes the market-implied expected "
+                          "return. A pure upgrade at today's risk level.", eur=True))
+
+    out.append(f"""
 <div class="note warn">
-<b>Honesty box.</b> "Expected return" = each asset's average daily return over the last
-{LB} days, annualised (×252). That assumes recent winners keep winning — momentum, not prophecy.
-The covariance (how assets move together) is far more stable than the return estimates.
-These weights are a quantified suggestion, not financial advice.
-</div>""".replace("{LB}", str(LOOKBACK_DAYS)))
+<b>* Expected return &amp; Sharpe</b> use Black-Litterman market-implied returns, not trailing history.
+They're a coherent relative ranking, not a promise — the market can be wrong. <b>Volatility and risk
+contributions are the solid numbers</b>; the covariance is estimated from {LOOKBACK_DAYS} days of prices
+and is far more stable than any return forecast. Not financial advice.
+</div>""")
     return "".join(out)
 
 
+def sec_risk_contrib(d: dict) -> str:
+    """The killer insight: where your risk actually comes from vs where your money is."""
+    universe, cur_w, rc = d["universe"], d["cur_w"], d["cur_rc"]
+    order = np.argsort(-rc)
+    rows = []
+    for i in order:
+        t = universe[i]
+        gap = rc[i] - cur_w[i]
+        cls = "neg" if gap > 0.02 else ("pos" if gap < -0.02 else "dim")
+        rows.append(f"<tr><td class='mono'>{t}</td><td>{NAMES.get(t, t)}</td>"
+                    f"<td class='num mono'>{cur_w[i]*100:.1f}%</td>"
+                    f"<td class='num mono'>{rc[i]*100:.1f}%</td>"
+                    f"<td class='num mono {cls}'>{gap*100:+.1f}pp</td></tr>")
+    return ("<h2>Where your risk actually comes from</h2>"
+            "<p class='dim'>Capital weight is how your money is split; risk contribution is how your "
+            "<i>volatility</i> is split (weight × how much it moves with the rest). A name with risk "
+            "far above its weight is silently driving your portfolio. Risk Parity above equalises the "
+            "right-hand column.</p>"
+            "<table><tr><th>Ticker</th><th>Name</th><th class='num'>Capital</th>"
+            "<th class='num'>Risk</th><th class='num'>Risk − Capital</th></tr>"
+            f"{''.join(rows)}</table>")
+
+
 def sec_frontier(d: dict) -> str:
-    mu, sig = d["mu"], d["sig"]
+    mu, sig = d["mu_bl"], d["sig"]
     cloud, frontier = d["cloud"], d["frontier"]
     fig = go.Figure()
     fig.add_trace(go.Scatter(
@@ -242,15 +298,18 @@ def sec_frontier(d: dict) -> str:
                                  hovertemplate=f"{name}: Sharpe {s:.2f}<extra></extra>"))
 
     pt(d["cur_w"], "Current", "circle", "#c586c0")
-    pt(d["w_sharpe"], "A · Max Sharpe", "star", "#dcdcaa")
-    pt(d["w_same_risk"], "B · Same-risk", "diamond", "#4ec9b0")
+    pt(d["w_minvar"], "Min-Var", "square", "#6a9955")
+    pt(d["w_rp"], "Risk-Parity", "triangle-up", "#b5cea8")
+    pt(d["w_bl_sharpe"], "BL Max-Sharpe", "star", "#dcdcaa")
+    pt(d["w_bl_same"], "BL Same-Risk", "diamond", "#4ec9b0")
     fig.update_layout(height=440, xaxis_title="Volatility (annual %)",
-                      yaxis_title="Expected return (annual %)",
+                      yaxis_title="Expected return — Black-Litterman implied (annual %)",
                       legend=dict(x=0.01, y=0.99))
     return ("<h2>Efficient frontier</h2>"
             "<p class='dim'>Each grey dot is a random mix of your assets. The white line is the "
-            "frontier — the best possible return at every risk level. Anything below it is "
-            "leaving return on the table.</p>"
+            "frontier — best return at every risk level. The vertical axis uses Black-Litterman "
+            "market-implied returns (not trailing history); the horizontal axis (volatility) is the "
+            "reliable one. Min-Var sits at the far left (lowest risk).</p>"
             f"<div class='chart'>{_fig_html(fig)}</div>")
 
 
@@ -380,40 +439,46 @@ def sec_correlation(d: dict) -> str:
 def sec_explainer() -> str:
     return f"""
 <h2>How the numbers are computed</h2>
-<details open><summary>Expected return &amp; volatility (the optimizer inputs)</summary>
+<details open><summary>Why not just use past returns? (the whole point)</summary>
+<p>Naive Markowitz feeds the optimizer each asset's <i>average past return</i> as its expected
+future return. This is its fatal flaw: a sample mean of returns is almost pure noise and just chases
+recent winners. The covariance matrix (how assets move together), by contrast, is statistically
+stable and genuinely useful. So this report uses covariance for everything and <b>never uses
+trailing returns as a forecast</b>.</p></details>
+<details><summary>Covariance &amp; volatility (the trustworthy input)</summary>
 <ul>
-<li><b>Expected return</b> per asset = average daily price return over the last {LOOKBACK_DAYS}
-calendar days × 252 trading days. Purely historical — it assumes the recent past continues.</li>
-<li><b>Volatility</b> = standard deviation of those daily returns × √252. "How much it swings."</li>
-<li><b>Portfolio volatility</b> is <i>not</i> the average of the assets' volatilities — it uses the
-covariance matrix, so assets that zig when others zag cancel risk out. This is the entire point
-of Markowitz: mixing imperfectly-correlated assets gives more return per unit of risk.</li>
+<li><b>Volatility</b> = standard deviation of daily returns × √252 — how much an asset swings.</li>
+<li><b>Covariance</b> = how each pair moves together, estimated from {LOOKBACK_DAYS} days of prices.</li>
+<li><b>Portfolio volatility</b> is <i>not</i> the average of asset volatilities — assets that zig
+while others zag cancel risk out. Exploiting that is the entire value of diversification.</li>
 </ul></details>
-<details><summary>Sharpe ratio</summary>
-<p>(portfolio return − {RF:.1%} risk-free) ÷ portfolio volatility. Return earned per unit of risk.
-&gt;1 is good, &gt;2 excellent. The risk-free rate is what cash earns, so only the excess counts.</p>
-</details>
-<details><summary>The two weight options</summary>
-<p><b>A · Max Sharpe</b>: scipy (SLSQP) searches all weight combinations (long-only, ≤{MAX_W:.0%}
-per asset, weights sum to 100%) for the one with the highest Sharpe ratio.</p>
-<p><b>B · Same-risk max-return</b>: maximises expected return under the same rules <i>plus</i> one
-extra constraint — portfolio volatility may not exceed your current portfolio's volatility.
-Same swings as today, more expected return.</p>
-</details>
+<details><summary>Minimum Variance &amp; Risk Parity (no return forecast)</summary>
+<p><b>Minimum Variance</b>: scipy (SLSQP) finds the weights with the lowest possible portfolio
+volatility (long-only, ≤{MAX_W:.0%} each, sum 100%). Needs only covariance.</p>
+<p><b>Risk Parity</b>: weights chosen so every asset contributes an equal share of total risk.
+Risk contribution of asset i = wᵢ × (Σw)ᵢ ⁄ portfolio variance. Also covariance-only — this is what
+risk-parity and minimum-volatility funds (e.g. the USMV ETF) actually do.</p></details>
+<details><summary>Black-Litterman (a return model that isn't momentum)</summary>
+<p>Instead of past returns, reverse the optimization: given the market's cap-weighted mix, what
+expected returns would make that mix optimal? <b>Π = δ · Σ · w_market</b> (δ = {BL_DELTA} risk
+aversion). These "implied" returns are the market's collective forecast. You can layer your own views
+on top (Black-Litterman blends them by confidence); with no views the report uses pure Π. Then the
+two BL portfolios run standard max-Sharpe / same-risk optimization on Π instead of on history.</p></details>
+<details><summary>Sharpe ratio &amp; the risk-free rate</summary>
+<p>(portfolio return − {RF:.1%}) ÷ volatility = return per unit of risk. The {RF:.1%} cash rate is a
+fixed offset — it shifts every Sharpe equally, so it never changes the <i>ranking</i> of portfolios;
+it only sets the bar that "doing nothing" (holding cash) clears.</p></details>
 <details><summary>Portfolio ROI (one formula everywhere)</summary>
-<p>ROI = (value of holdings + cash received from sells) ÷ total of all buys − 1.
-Benchmarks are simulated with the same cash flows: every time you bought, the same euros buy the
-benchmark instead. So the comparison answers: "what if every purchase had gone into the S&amp;P
-instead?"</p>
-</details>
+<p>ROI = (value of holdings + cash from sells) ÷ total of all buys − 1. Benchmarks use the same cash
+flows: every euro you spent buys the benchmark instead — "what if each purchase had gone into the
+S&amp;P?"</p></details>
 <details><summary>Risk metrics</summary>
 <ul>
-<li><b>Max drawdown</b> — worst peak-to-trough fall of the portfolio value curve.</li>
-<li><b>VaR 95%</b> — your daily loss was no worse than this on 95% of days.</li>
-<li><b>CVaR 95%</b> — the average loss on the worst 5% of days (tail risk).</li>
-<li><b>Beta</b> — sensitivity to the S&amp;P 500 (1 = moves one-for-one).
-<b>Alpha</b> — annualised return beyond what beta alone would deliver.</li>
-<li><b>Sortino</b> — Sharpe that only counts downside volatility.</li>
+<li><b>Max drawdown</b> — worst peak-to-trough fall of the value curve.</li>
+<li><b>VaR 95%</b> — daily loss not exceeded on 95% of days. <b>CVaR 95%</b> — average loss on the
+worst 5% of days.</li>
+<li><b>Beta</b> — sensitivity to the S&amp;P 500. <b>Alpha</b> — return beyond what beta predicts.
+<b>Sortino</b> — Sharpe counting only downside.</li>
 </ul></details>
 """
 
@@ -429,6 +494,7 @@ def build(d: dict, public: bool) -> str:
         f"<h1>{title}</h1><p class='dim'>generated {now} · {badge}</p>",
         sec_summary(d, public),
         sec_weights_now(d, public),
+        sec_risk_contrib(d),
         sec_frontier(d),
         sec_roi(d),
         sec_risk(d),

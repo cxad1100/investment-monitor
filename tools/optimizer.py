@@ -128,6 +128,100 @@ def optimize(mean_ann: pd.Series, cov_ann: pd.DataFrame, *, objective: str = "sh
     return _solve(fn, n, bounds, cons)
 
 
+def risk_contributions(w, cov_ann) -> np.ndarray:
+    """Fraction of total portfolio variance contributed by each asset (sums to 1)."""
+    w = np.asarray(w, float)
+    sig = cov_ann.values if hasattr(cov_ann, "values") else np.asarray(cov_ann)
+    pv = float(w @ sig @ w)
+    if pv <= 0:
+        return np.zeros_like(w)
+    return (w * (sig @ w)) / pv
+
+
+def risk_parity(cov_ann: pd.DataFrame, *, max_w: float = 1.0) -> np.ndarray | None:
+    """
+    Equal Risk Contribution portfolio: weights so every asset contributes the same
+    share of total risk. Needs only the covariance matrix — no return forecast.
+    Long-only, weights sum to 1.
+    """
+    sig = cov_ann.values if hasattr(cov_ann, "values") else np.asarray(cov_ann)
+    n = sig.shape[0]
+    target = 1.0 / n
+
+    def obj(w):
+        pv = float(w @ sig @ w)
+        if pv <= 0:
+            return 1e6
+        rc = (w * (sig @ w)) / pv
+        return float(np.sum((rc - target) ** 2))
+
+    bounds = tuple((1e-4, max_w) for _ in range(n))   # tiny floor keeps risk-contrib defined
+    cons = [{"type": "eq", "fun": lambda w: w.sum() - 1.0}]
+    return _solve(obj, n, bounds, cons, x0=np.repeat(1.0 / n, n))
+
+
+def implied_equilibrium_returns(cov_ann: pd.DataFrame, market_weights, delta: float = 2.5) -> pd.Series:
+    """
+    Black-Litterman reverse optimization: the excess returns the market must expect
+    to hold its current cap-weighted mix. Π = δ · Σ · w_market.
+    """
+    sig = cov_ann.values if hasattr(cov_ann, "values") else np.asarray(cov_ann)
+    w = np.asarray(market_weights, float)
+    return pd.Series(delta * (sig @ w), index=cov_ann.index)
+
+
+def black_litterman(cov_ann: pd.DataFrame, market_weights, *, delta: float = 2.5,
+                    tau: float = 0.05, views: list[dict] | None = None) -> pd.Series:
+    """
+    Black-Litterman posterior expected EXCESS returns.
+
+    Starts from market-implied equilibrium (Π = δΣw_mkt) — the market's collective
+    forecast, not trailing momentum — and blends in optional subjective views.
+    No views → returns Π unchanged.
+
+    views: [{"assets": {ticker: weight}, "ret": annual_excess, "confidence": 0..1}]
+           e.g. absolute view "NVDA returns 15%/yr": {"assets": {"NVD.F": 1}, "ret": 0.15, "confidence": 0.6}
+    """
+    idx = list(cov_ann.index)
+    sig = cov_ann.values if hasattr(cov_ann, "values") else np.asarray(cov_ann)
+    pi = delta * (sig @ np.asarray(market_weights, float))
+    if not views:
+        return pd.Series(pi, index=idx)
+
+    P, Q, conf = [], [], []
+    for v in views:
+        row = np.zeros(len(idx))
+        for tk, wt in v["assets"].items():
+            if tk in idx:
+                row[idx.index(tk)] = wt
+        P.append(row); Q.append(v["ret"]); conf.append(v.get("confidence", 0.5))
+    P, Q = np.array(P), np.array(Q)
+    tau_sig = tau * sig
+    # Ω: view uncertainty scaled inversely by confidence
+    omega = np.diag(np.diag(P @ tau_sig @ P.T) / np.clip(conf, 1e-3, 1.0))
+    A = np.linalg.inv(tau_sig)
+    Oi = np.linalg.inv(omega)
+    mu = np.linalg.inv(A + P.T @ Oi @ P) @ (A @ pi + P.T @ Oi @ Q)
+    return pd.Series(mu, index=idx)
+
+
+def fetch_market_caps(tr_tickers: list[str]) -> dict[str, float]:
+    """Market cap per ticker (totalAssets for ETFs). Frankfurt listings carry caps too."""
+    out = {}
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        for tk in tr_tickers:
+            yft = TICKER_MAP.get(tk, tk)
+            try:
+                info = yf.Ticker(yft).info
+                cap = info.get("marketCap") or info.get("totalAssets")
+                if cap and cap > 0:
+                    out[tk] = float(cap)
+            except Exception:
+                pass
+    return out
+
+
 def max_return_at_vol(mean_ann: pd.Series, cov_ann: pd.DataFrame, vol_cap: float, *,
                       long_only: bool = True, max_w: float = 1.0, min_w: float = 0.0,
                       sector_caps: dict[str, float] | None = None) -> np.ndarray | None:

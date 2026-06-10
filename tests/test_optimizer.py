@@ -11,6 +11,10 @@ from tools.optimizer import (
     efficient_frontier,
     portfolio_perf,
     to_returns,
+    risk_parity,
+    risk_contributions,
+    implied_equilibrium_returns,
+    black_litterman,
 )
 from tools.portfolio_meta import sector_exposure_matrix
 
@@ -98,6 +102,53 @@ def test_same_risk_max_return(synth):
     assert v <= eq_vol + 1e-4          # vol cap respected
     assert r >= eq_ret - 1e-6          # at least as much return at same risk
     assert abs(w.sum() - 1.0) < 1e-6
+
+
+def test_risk_parity_equalises_contributions(synth):
+    mean_ann, cov_ann = synth
+    w = risk_parity(cov_ann)
+    assert w is not None
+    assert abs(w.sum() - 1.0) < 1e-6
+    rc = risk_contributions(w, cov_ann)
+    # all risk contributions ~ 1/n
+    assert np.allclose(rc, 1.0 / len(rc), atol=0.03)
+
+
+def test_risk_contributions_sum_to_one(synth):
+    _, cov_ann = synth
+    w = np.array([0.5, 0.3, 0.2])
+    rc = risk_contributions(w, cov_ann)
+    assert abs(rc.sum() - 1.0) < 1e-9
+
+
+def test_implied_returns_recover_market_view(synth):
+    """Π = δΣw_mkt: max-Sharpe on Π (no constraints binding) ≈ market weights."""
+    _, cov_ann = synth
+    mkt = np.array([0.5, 0.3, 0.2])
+    pi = implied_equilibrium_returns(cov_ann, mkt, delta=2.5)
+    assert list(pi.index) == list(cov_ann.index)
+    # With rf=0, max-Sharpe tangency w ∝ Σ⁻¹Π = δ·w_mkt → recovers market weights.
+    w = optimize(pi, cov_ann, objective="sharpe", rf=0.0, max_w=1.0)
+    assert np.allclose(w, mkt, atol=0.05)
+
+
+def test_black_litterman_no_views_equals_pi(synth):
+    _, cov_ann = synth
+    mkt = np.array([0.4, 0.35, 0.25])
+    pi = implied_equilibrium_returns(cov_ann, mkt)
+    bl = black_litterman(cov_ann, mkt, views=None)
+    assert np.allclose(pi.values, bl.values)
+
+
+def test_black_litterman_view_tilts(synth):
+    _, cov_ann = synth
+    mkt = np.array([0.4, 0.35, 0.25])
+    pi = implied_equilibrium_returns(cov_ann, mkt)
+    tk = list(cov_ann.index)
+    # bullish absolute view on asset 0 above its implied return → BL raises it
+    view = [{"assets": {tk[0]: 1.0}, "ret": float(pi.iloc[0]) + 0.20, "confidence": 0.8}]
+    bl = black_litterman(cov_ann, mkt, views=view)
+    assert bl.iloc[0] > pi.iloc[0]
 
 
 def test_efficient_frontier_monotone(synth):
