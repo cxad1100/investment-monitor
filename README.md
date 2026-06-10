@@ -1,22 +1,24 @@
-# Monitor
+# Investment Monitor
 
-Investment dashboard. Collects signals from 13 sources, scores every asset, and serves a live Streamlit dashboard.
+A static-HTML investment dashboard for a Trade Republic portfolio. One Python script
+reads your trade history, pulls live data from yfinance, runs a Markowitz mean-variance
+optimizer, and writes a self-contained dark-themed HTML report. No server, no API keys.
+
+Two builds per run:
+
+| File | Audience | Content |
+|---|---|---|
+| `local/report.html` | you (gitignored) | everything, incl. € amounts and € to shift per position |
+| `docs/index.html` | GitHub Pages (public) | percentages, weights, ratios only — **no euro amounts, shares, or costs** |
 
 ## Setup
 
 ```bash
-git clone https://github.com/cxad1100/investment-monitor.git
-cd investment-monitor
 uv venv .venv --python 3.13 && uv pip install -r requirements.txt --python .venv
-source .venv/bin/activate
 ```
 
-Create `input/.env`:
-```
-FRED_API_KEY=your_key    # free at fred.stlouisfed.org
-```
+Add your trade history at `input/portfolio.csv` (gitignored):
 
-Optionally add `input/portfolio.csv` with your trade history:
 ```
 Date,Ticker,Action,Shares,Price,PricePerShare
 2024-11-18,ASML.AS,buy,0.25,160.30,641.20
@@ -25,21 +27,37 @@ Date,Ticker,Action,Shares,Price,PricePerShare
 ## Usage
 
 ```bash
-./start.sh                   # launch dashboard (uses last collected data)
-python collect_all.py        # collect all signals (~20-30 min)
-python collect_all.py --fast # fast mode, 50 tickers (~5 min)
+bash start.sh                       # build both reports + open the private one
+.venv/bin/python build_report.py    # build only
+.venv/bin/pytest tests/             # tests
 ```
 
-## Signal Sources
+Deploy: commit `docs/index.html`, push, serve via **GitHub Pages** (Settings → Pages →
+deploy from branch → `/docs`).
 
-FRED macro, commodity futures, Polymarket, GDELT conflict indices, Reuters RSS, yfinance (prices, fundamentals, options, short interest, bonds, currencies, sector ETFs, commodities), SEC insider flow, Reddit WSB, BTC.
+## What the report shows
 
-## Scoring
+- **Weights to use now** — the actionable core. Your current weights next to two
+  optimized alternatives over the same assets:
+  - **A · Max Sharpe** — highest return per unit of risk (the textbook optimum)
+  - **B · Same-risk max-return** — keeps your current volatility, maximizes expected
+    return: a pure upgrade if today's swings are acceptable
+- **Efficient frontier** — where your mix sits vs the best possible mixes
+- **ROI vs benchmarks** — cash-flow matched (same euros, same dates, into each benchmark)
+- **Risk & efficiency** — Sharpe, Sortino, drawdowns, VaR/CVaR, beta, alpha
+- **Rolling backtest** — walk-forward monthly re-optimization vs equal-weight + S&P 500,
+  no look-ahead, with an explicit selection-bias caveat
+- **Correlation heatmap** + positions
+- **"How the numbers are computed"** — plain-language explainer of every formula
 
-`fast_scorer.py` computes a 0–100 composite per asset (earnings, insider flow, macro, geopolitics, fundamentals, options, momentum). Scores are percentile-stretched across the full universe. `⚠` on a grade = fewer than 2 real data sources, mostly defaults.
+## Architecture
 
-## Dashboard
-
-- **World View** — macro regime, events, themes, sentiment, bonds, FX, commodities  
-- **Ratings** — full universe ranked by score, filterable, deep-dive on click  
-- **Portfolio** — live prices, allocation bars, P&L, ROI vs benchmarks, quant metrics, correlation matrix
+```
+input/portfolio.csv               ← trade history (gitignored)
+build_report.py                   ← orchestrates: data → optimizer → HTML
+ ├─ tools/portfolio_tools.py      ← CSV → holdings, P&L; live prices
+ ├─ tools/portfolio_analytics.py  ← ROI series, quant metrics, correlation
+ ├─ tools/optimizer.py            ← Markowitz: frontier, max-Sharpe, same-risk, backtest
+ ├─ tools/portfolio_meta.py       ← sector maps, ETF decomposition
+ └─ tools/theme.py                ← VSCode Dark+ palette, plotly template, CSS
+```

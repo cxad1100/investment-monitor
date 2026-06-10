@@ -89,21 +89,37 @@ def build_roi_timeseries(transactions: list[dict]) -> tuple[pd.Series, dict]:
 
     biz_days = pd.bdate_range(start=start_date, end=datetime.today())
 
-    # Group transactions by date
-    txns_by_date: dict[str, list] = {}
-    for t in sorted(transactions, key=lambda x: x["date"]):
-        txns_by_date.setdefault(t["date"], []).append(t)
+    # Chronological queue — consumed with a `<=` pointer so weekend/holiday-dated
+    # transactions (e.g. Tradegate Sunday trades) apply on the next business day
+    # instead of being silently skipped.
+    txn_queue = sorted(transactions, key=lambda x: (x["date"], x["action"]))
+    txn_idx = 0
 
-    # ── Portfolio series ──────────────────────────────────────────────────────
+    # ── Portfolio series (cash-flow matched, same formula as benchmarks) ─────────
+    # Return = (current_value / total_invested - 1), matching the benchmark formula
+    # at line 204. This makes pp-delta comparisons meaningful.
     holdings: dict[str, float] = {}
     avg_cost: dict[str, float] = {}
     total_invested = 0.0
+    cash_from_sells = 0.0   # sale proceeds stay in the return calc (otherwise sells look like losses)
     port_vals: dict[str, float] = {}
+
+    def _portfolio_value(dt: pd.Timestamp) -> float:
+        v = 0.0
+        for tk, sh in holdings.items():
+            if sh <= 0:
+                continue
+            p = _price_on(port_hist[tk], dt) if tk in port_hist else avg_cost.get(tk)
+            if p is None:
+                p = avg_cost.get(tk, 0.0)
+            v += sh * p
+        return v
 
     for date in biz_days:
         ds = str(date.date())
-
-        for txn in txns_by_date.get(ds, []):
+        while txn_idx < len(txn_queue) and txn_queue[txn_idx]["date"] <= ds:
+            txn = txn_queue[txn_idx]
+            txn_idx += 1
             tk = txn["ticker"]
             if txn["action"] == "buy":
                 sh, pps = float(txn["shares"]), float(txn["pps"])
@@ -114,19 +130,12 @@ def build_roi_timeseries(transactions: list[dict]) -> tuple[pd.Series, dict]:
                 total_invested += float(txn["price"])
             elif txn["action"] == "sell":
                 holdings[tk] = max(0.0, holdings.get(tk, 0.0) - float(txn["shares"]))
+                cash_from_sells += float(txn["price"])
 
         if total_invested == 0:
             continue
 
-        value = 0.0
-        for tk, sh in holdings.items():
-            if sh <= 0:
-                continue
-            p = _price_on(port_hist[tk], date) if tk in port_hist else avg_cost.get(tk, 0)
-            if p is None:
-                p = avg_cost.get(tk, 0)
-            value += sh * p
-
+        value = _portfolio_value(date) + cash_from_sells
         port_vals[ds] = round((value / total_invested - 1) * 100, 4)
 
     portfolio_series = pd.Series(port_vals)

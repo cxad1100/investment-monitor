@@ -1,114 +1,70 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code (claude.ai/code) working in this repository.
 
-## Setup
+## What this is
+
+A **static-HTML investment monitor**. `build_report.py` reads a Trade Republic
+trade-history CSV, computes everything live from yfinance, runs a Markowitz optimizer,
+and writes self-contained dark HTML reports. **No Streamlit, no server, no API keys.**
+
+Two outputs per run:
+- `local/report.html` — private, full € amounts (gitignored)
+- `docs/index.html` — public for GitHub Pages: **percentages only — never € amounts,
+  share counts, costs, or transactions**. Any new section must respect the `public`
+  flag passed through `build()`/section functions.
+
+> The old Streamlit multi-agent rating system lives in `../investment-monitor-full`.
+
+## Setup / run
 
 ```bash
-# Install dependencies (requires uv: brew install uv)
 uv venv .venv --python 3.13 && uv pip install -r requirements.txt --python .venv
-source .venv/bin/activate
-
-# .env required (copy and fill in):
-# FRED_API_KEY=...   (free at https://fred.stlouisfed.org/docs/api/api_key.html)
-# ANTHROPIC_API_KEY=...
+bash start.sh                       # build + open private report
+.venv/bin/python build_report.py    # build only
+.venv/bin/pytest tests/             # tests
 ```
 
-## Running
-
-```bash
-# Collect all signals (full run, ~20-30 min)
-python collect_all.py
-
-# Fast test mode (50 tickers, skips validation, ~5 min)
-python collect_all.py --fast
-
-# Streamlit dashboard (reads data/signals.json + ratings_report.json)
-streamlit run app.py
-
-# Automated weekly collect + git push (runs via cron Sunday 7pm Rome)
-bash collect_and_push.sh
-
-# Run tests
-.venv/bin/pytest tests/ -v
-
-# Run a single test file
-.venv/bin/pytest tests/test_fast_scorer.py -v
-```
+Deploy = commit `docs/index.html` + push; GitHub Pages serves `/docs` on master.
 
 ## Architecture
 
-Two-pass weekly pipeline running every Sunday 7pm (Rome time) via Claude Code remote agent:
-
-**Pass 1 (Python):** `collect_all.py` → 13 collectors → `data/signals.json`
-**Pass 2 (Claude):** Reads `signals.json` → extracts events → rates all assets → `data/ratings_report.json`
-
 ```
-data/universe.csv        ← all TR stocks + ETFs (auto-refreshed weekly)
-     │
-collect_all.py (13 collectors in sequence)
-     │
-data/signals.json        ← compact signal snapshot
-     │
-[Claude Code session]    ← extracts events A/B/C..., rates each asset
-     │
-data/ratings_report.json ← S&P-style grades + event portfolio matrix
-     │
-app.py (Streamlit)       ← dashboard: World View / Ratings / Portfolio tabs
+input/portfolio.csv               ← trade history (gitignored, NEVER commit)
+build_report.py                   ← data → optimizer → HTML (section functions, public flag)
+ ├─ tools/portfolio_tools.py      ← parse CSV → holdings, avg cost, P&L; live prices
+ ├─ tools/portfolio_analytics.py  ← ROI time-series, quant metrics, correlation
+ ├─ tools/optimizer.py            ← Markowitz (scipy SLSQP), pure functions
+ ├─ tools/portfolio_meta.py       ← sector map, ETF decomposition (sector_exposure_matrix)
+ └─ tools/theme.py                ← VSCode Dark+ palette, plotly "vsdark" template, REPORT_CSS
 ```
 
-## Signal Sources
+Optimizer settings are constants at the top of `build_report.py`
+(`LOOKBACK_DAYS=365`, `RF=0.045`, `LONG_ONLY=True`, `MAX_W=0.35`, `REB_FREQ="M"`).
 
-| # | Collector | Source | Key Signal |
-|---|---|---|---|
-| 1 | UniverseManager | Wikipedia S&P 500 + seed European/ETF lists | Full TR asset list |
-| 2 | Macro/FRED | fredapi | Regime + rates + CPI + yield curve |
-| 3 | Futures | yfinance CL=F GC=F NG=F HG=F | Sector tailwinds/headwinds |
-| 4 | Polymarket | gamma-api.polymarket.com | Event probabilities |
-| 5 | GDELT | api.gdeltproject.org | Regional conflict indices |
-| 6 | News | Reuters RSS | Sector headlines |
-| 7 | Price + Fundamentals | yfinance | PE, ROE, earnings, analyst scores |
-| 8 | InsiderFlow | SEC EDGAR Form 4 | Net insider buys/sells |
-| 9 | OptionsFlow | yfinance options chain | Put-call ratio |
-| 10 | ShortInterest | yfinance shortPercentOfFloat | Short float % |
-| 11 | Bond yields + curve | yfinance | 2Y/10Y/30Y + spread |
-| 12 | Currencies + sector ETFs | yfinance | FX, sector 1M performance leaders/laggards |
-| 13 | Extended commodities | yfinance | Wheat, lumber, LNG, uranium, etc. |
-| + | WSB | reddit.com/r/wallstreetbets | Ticker mentions, squeeze flags |
-| + | BTC | yfinance BTC-USD | Liquidity/risk-on signal |
+## Calculation invariants (hard-won — don't regress)
 
-## Event Framework
+- **One ROI formula everywhere**: `(holdings value + cash from sells) / sum of all buys − 1`.
+  Sale proceeds count as cash; benchmarks are cash-flow matched (same EUR, same dates).
+- `build_roi_timeseries` consumes transactions with a `<=` date pointer —
+  weekend-dated trades (Tradegate Sundays) apply the next business day; exact-date
+  lookup against `bdate_range` silently drops them (caused a 2pp ROI bug).
+- `rolling_backtest` estimates weights from a **calendar-day** window strictly
+  **before** each rebalance date — no look-ahead.
+- Backtest universe = current holdings ⇒ selection bias; the report's honest comparison
+  is Optimized vs Equal-Weight, and the caveat box must stay.
+- Two weight recommendations: **A** `optimize(objective="sharpe")`,
+  **B** `max_return_at_vol(vol_cap=current portfolio vol)`.
 
-Events A/B/C… extracted by Claude from Polymarket + GDELT + news. Each has `probability` + `complement_probability`. `event_extractor.py` validates coherence (probabilities in [0,1], mutually-exclusive pairs sum ≤ 1). Claude maps events to TR assets via multi-hop causal chains. `app.py` has hardcoded `IMPACT` causal-chain descriptions per event group × sector for the dashboard.
+## Key maps (`tools/portfolio_tools.py`)
 
-## Rating Scale
+- `TICKER_MAP` — TR ticker → yfinance price ticker (e.g. `EUNL.F` → `IWDA.AS`)
+- `COMPANY_NAMES` — display names
+- `BENCHMARKS` — EUR-listed ETFs + USD ones FX-converted
 
-AAA / AA+ / AA / AA- / A+ / A / A- / BBB+ / BBB / BBB- / BB+ / BB / BB- / B / CCC / CC
+## Adding a new holding
 
-Fast scorer (`fast_scorer.py`): composite 0-100 from earnings, insider, macro, momentum, geo, options, short-interest, fundamentals, price signals → grade. Assets scoring ≥70 (`DEEP_RATING_THRESHOLD` in `config.py`) get Claude deep analysis in Pass 2.
-
-## Portfolio Tab
-
-`tools/portfolio_tools.py` parses a Trade Republic trade-history CSV (`data/portfolio.csv`) into live holdings with average cost, unrealised/realised P&L, and per-position rating lookup. `TICKER_MAP` maps TR Frankfurt/Milan tickers (e.g. `NVD.F`) to yfinance price tickers; `RATING_LOOKUP` maps them to primary-exchange tickers for rating lookups (e.g. `NVD.F` → `NVDA`).
-
-## Data Files
-
-| File | Updated | Contents |
-|---|---|---|
-| `data/universe.csv` | Weekly | All TR assets (stocks + ETFs) |
-| `data/signals.json` | Weekly | All 13 signal outputs |
-| `data/ratings_report.json` | Weekly | Final S&P-style grades |
-| `data/last_ratings.json` | Weekly | Previous week grades (for change detection) |
-| `data/portfolio.csv` | Manual | TR trade-history export (for Portfolio tab) |
-
-## Key Config (`config.py`)
-
-- `MODEL = "claude-opus-4-7"` — model used by Pass 2 and legacy agents
-- `DEEP_RATING_THRESHOLD = 70` — minimum fast-score for Claude deep rating
-- `FRED_SERIES` — all FRED series IDs fetched in Pass 1
-- `SECTOR_WEIGHTS_BY_REGIME` — target allocation weights by macro regime
-- `RISK_RULES` — position/sector caps used by portfolio construction
-
-## Legacy Pipeline
-
-`pipeline.py` + `agents/` is an older 4-agent Claude-API system (data engineer → macro analyst → fundamental analyst → portfolio manager). Entry point: `python main.py`. This is separate from the current collect_all.py → signals.json workflow and is not part of the weekly run.
+Append the row to `input/portfolio.csv` (`Date,Ticker,Action,Shares,Price,PricePerShare`)
+with the exchange-suffixed yfinance ticker. New ticker → add to `TICKER_MAP` (if price
+ticker differs), `COMPANY_NAMES`, and `PORTFOLIO_SECTOR_MAP` in `tools/portfolio_meta.py`.
+Then rebuild: `bash start.sh`.

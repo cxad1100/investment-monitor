@@ -1,11 +1,9 @@
 .venv/
 .env
 input/
-data/portfolio.csv
-data/collect.log
-data/collect_status.json
-data/signals.json
-data/portfolio_analytics_cache.json
+local/
 __pycache__/
+.pytest_cache/
 .DS_Store
 .vscode/
+.claude/

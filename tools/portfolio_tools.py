@@ -3,49 +3,56 @@
 import warnings
 import csv
 from pathlib import Path
-from datetime import datetime
 
 import yfinance as yf
 
-# Map TR tickers → yfinance price ticker (for live price fetching)
+# Map TR tickers → yfinance price ticker
+# EUNL.F (Frankfurt) has stale yfinance data — use IWDA.AS (same ISIN IE00B4L5Y983) for price
 TICKER_MAP = {
-    "NVD.F":  "NVD.F",    # NVIDIA on Frankfurt
-    "AMZ.F":  "AMZ.F",    # Amazon on Frankfurt
-    "ABEA.F": "ABEA.F",   # Alphabet/Google A on Frankfurt
-    "TSFA.F": "TSFA.F",   # TSMC on Frankfurt
+    "NVD.F":  "NVD.F",
+    "AMZ.F":  "AMZ.F",
+    "ABEA.F": "ABEA.F",
+    "TSFA.F": "TSFA.F",
     "LHL.F":  "LHL.F",
-    "TCO0.F": "TCO0.F",   # Tesco on Frankfurt
-    "WBD.MI": "WBD.MI",   # Webuild SpA on Borsa Italiana
+    "TCO0.F": "TCO0.F",
+    "ASME.F": "ASME.F",
+    "IES.F":  "IES.F",
+    "CRIN.F": "CRIN.F",
+    "EUNL.F": "IWDA.AS",  # same ISIN, IWDA.AS has live yfinance data; EUNL.F is stale
+    "IPJ1.F": "IPJ1.F",
 }
 
-# Map TR tickers → our fast_scores universe ticker (for rating lookup)
-# Frankfurt/Milan listings of global companies rate under their primary ticker
+# Tickers priced in non-EUR
+TICKER_CURRENCY: dict[str, str] = {}
+
+# Map portfolio ticker → fast_scores key (yf_ticker in universe)
 RATING_LOOKUP = {
-    "NVD.F":   "NVDA",     # NVIDIA (Frankfurt) → NASDAQ primary ticker
-    "AMZ.F":   "AMZN",     # Amazon (Frankfurt) → NASDAQ primary ticker
-    "ABEA.F":  "GOOGL",    # Alphabet Class A (Frankfurt) → NASDAQ primary ticker
-    "TSFA.F":  "TSM",      # TSMC (Frankfurt) → NYSE primary ticker
-    "TCO0.F":  "TSCO.L",   # Tesco (Frankfurt) → LSE primary ticker
-    "ASML.AS": "ASML.AS",  # ASML — Euronext Amsterdam, rated directly
-    "IWDA.AS": "IWDA.AS",  # iShares MSCI World ETF — rated directly
-    "ISP.MI":  "ISP.MI",   # Intesa Sanpaolo — rated directly
-    "UCG.MI":  "UCG.MI",   # UniCredit — rated directly
-    "WBD.MI":  "WBD.MI",   # Webuild SpA — rated directly
+    "NVD.F":  "NVD.F",
+    "AMZ.F":  "AMZ.F",
+    "ABEA.F": "ABEA.F",
+    "TSFA.F": "TSFA.F",
+    "ASME.F": "ASME.F",
+    "IES.F":  "IES.F",
+    "CRIN.F": "CRIN.F",
+    "EUNL.F": "EUNL.F",
+    "WBD.MI": "WBD.MI",
+    "APC.F":  "AAPL",
 }
 
-# Canonical company names for display (overrides yfinance name when known)
+# Canonical display names
 COMPANY_NAMES = {
-    "NVD.F":   "NVIDIA Corporation",
-    "AMZ.F":   "Amazon.com Inc.",
-    "ABEA.F":  "Alphabet Inc. (Google)",
-    "TSFA.F":  "Taiwan Semiconductor (TSMC)",
-    "TCO0.F":  "Tesco PLC",
-    "LHL.F":   "Lenovo Group",
-    "ASML.AS": "ASML Holding",
-    "IWDA.AS": "iShares Core MSCI World ETF",
-    "ISP.MI":  "Intesa Sanpaolo",
-    "UCG.MI":  "UniCredit",
-    "WBD.MI":  "Webuild S.p.A.",
+    "NVD.F":  "NVIDIA Corporation",
+    "AMZ.F":  "Amazon.com Inc.",
+    "ABEA.F": "Alphabet Inc. (Google)",
+    "TSFA.F": "Taiwan Semiconductor (TSMC)",
+    "LHL.F":  "Lenovo Group",
+    "TCO0.F": "Tesco PLC",
+    "ASME.F": "ASML Holding",
+    "IES.F":  "Intesa Sanpaolo",
+    "CRIN.F": "UniCredit",
+    "EUNL.F": "iShares Core MSCI World ETF",
+    "WBD.MI": "Webuild S.p.A.",
+    "APC.F":  "Apple Inc.",
 }
 
 
@@ -114,11 +121,11 @@ def parse_portfolio(csv_path: str | Path) -> dict:
 
 
 BENCHMARKS = {
-    "S&P 500":          ("SPY",     "USD"),
-    "MSCI World":       ("IWDA.AS", "EUR"),  # EUR-denominated — no FX conversion
+    "S&P 500":          ("CSPX.AS", "EUR"),  # iShares Core S&P 500 UCITS ETF Acc — EUR-listed, no FX noise
+    "MSCI World":       ("IWDA.AS", "EUR"),  # iShares Core MSCI World — EUR-listed
     "Gold":             ("GLD",     "USD"),
     "Bitcoin":          ("BTC-USD", "USD"),
-    "Emerging Markets": ("EEM",     "USD"),
+    "Emerging Markets": ("EUNM.F",  "EUR"),  # iShares MSCI EM UCITS ETF Acc — EUR-listed Frankfurt
     "Fixed Income":     ("BND",     "USD"),
 }
 
@@ -211,26 +218,43 @@ def fetch_benchmark_returns(transactions: list[dict]) -> dict[str, dict]:
 
 
 def fetch_current_prices(holdings: dict) -> dict[str, float | None]:
-    """Fetch current EUR prices for all held tickers."""
-    prices = {}
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        for ticker in holdings:
-            yf_ticker = TICKER_MAP.get(ticker, ticker)
+    """Fetch current EUR prices for all held tickers. Converts USD/GBP/HKD via live FX."""
+    import time as _time
+
+    def _fetch_price_raw(yf_ticker: str, attempts: int = 3) -> float | None:
+        for attempt in range(attempts):
             try:
-                info = yf.Ticker(yf_ticker).fast_info
-                price = getattr(info, "last_price", None)
-                if price and price > 0:
-                    prices[ticker] = round(float(price), 4)
-                else:
-                    # Fallback: history
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    info = yf.Ticker(yf_ticker).fast_info
+                    price = getattr(info, "last_price", None)
+                    if price and float(price) > 0:
+                        return round(float(price), 4)
                     hist = yf.Ticker(yf_ticker).history(period="5d")
                     if not hist.empty:
-                        prices[ticker] = round(float(hist["Close"].iloc[-1]), 4)
-                    else:
-                        prices[ticker] = None
+                        return round(float(hist["Close"].iloc[-1]), 4)
             except Exception:
-                prices[ticker] = None
+                pass
+            if attempt < attempts - 1:
+                _time.sleep(20)
+        return None
+
+    # Fetch GBP/EUR only if TSCO.L is in holdings
+    gbpeur = None
+    if any(TICKER_MAP.get(t, t) == "TSCO.L" for t in holdings):
+        gbpeur = _fetch_price_raw("GBPEUR=X")
+
+    prices = {}
+    for ticker in holdings:
+        yf_ticker = TICKER_MAP.get(ticker, ticker)
+        raw = _fetch_price_raw(yf_ticker)
+        if raw is None:
+            prices[ticker] = None
+            continue
+        if TICKER_CURRENCY.get(yf_ticker) == "GBP" and gbpeur:
+            prices[ticker] = round(raw * gbpeur, 4)
+        else:
+            prices[ticker] = raw
     return prices
 
 
@@ -254,7 +278,6 @@ def compute_portfolio_summary(portfolio: dict, current_prices: dict) -> dict:
     for ticker, h in holdings.items():
         shares    = h["shares"]
         avg_cost  = h["avg_cost"]
-        invested  = h["total_invested"]
         cur_price = current_prices.get(ticker)
 
         if cur_price:
