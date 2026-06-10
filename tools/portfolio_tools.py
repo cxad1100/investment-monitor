@@ -122,10 +122,13 @@ def parse_portfolio(csv_path: str | Path) -> dict:
 
 BENCHMARKS = {
     "S&P 500":          ("CSPX.AS", "EUR"),  # iShares Core S&P 500 UCITS ETF Acc — EUR-listed, no FX noise
+    "Nasdaq 100":       ("CNDX.AS", "EUR"),  # iShares Nasdaq 100 UCITS — EUR-listed
     "MSCI World":       ("IWDA.AS", "EUR"),  # iShares Core MSCI World — EUR-listed
+    "FTSE All-World":   ("VWCE.DE", "EUR"),  # Vanguard FTSE All-World Acc — developed + EM
+    "Euro Stoxx 50":    ("EXW1.DE", "EUR"),  # iShares Core EURO STOXX 50
+    "Emerging Markets": ("EUNM.F",  "EUR"),  # iShares MSCI EM UCITS ETF Acc — EUR-listed Frankfurt
     "Gold":             ("GLD",     "USD"),
     "Bitcoin":          ("BTC-USD", "USD"),
-    "Emerging Markets": ("EUNM.F",  "EUR"),  # iShares MSCI EM UCITS ETF Acc — EUR-listed Frankfurt
     "Fixed Income":     ("BND",     "USD"),
 }
 

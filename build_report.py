@@ -317,28 +317,37 @@ def sec_roi(d: dict) -> str:
     roi, bms = d["roi_series"], d["bm_series"]
     if roi.empty:
         return ""
-    BM_COLORS = {"Portfolio": "#569cd6", "S&P 500": "#d16969", "Gold": "#d7ba7d",
-                 "Bitcoin": "#ce9178", "MSCI World": "#6a9955",
-                 "Emerging Markets": "#c586c0", "Fixed Income": "#808080"}
+    BM_COLORS = {"Portfolio": "#ffffff", "S&P 500": "#d16969", "Nasdaq 100": "#e8a04e",
+                 "MSCI World": "#6a9955", "FTSE All-World": "#4ec9b0",
+                 "Euro Stoxx 50": "#9cdcfe", "Emerging Markets": "#c586c0",
+                 "Gold": "#d7ba7d", "Bitcoin": "#ce9178", "Fixed Income": "#808080"}
+    start = roi.index[0].strftime("%Y-%m-%d")
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=roi.index, y=roi.values, name="Portfolio",
-                             line=dict(color=BM_COLORS["Portfolio"], width=2.5)))
+    # benchmarks first (thin), portfolio on top (thick white) so it stands out
     for nm, s in bms.items():
         if not s.empty:
             fig.add_trace(go.Scatter(x=s.index, y=s.values, name=nm,
                                      line=dict(color=BM_COLORS.get(nm, "#aaa"), width=1.4),
-                                     opacity=0.85))
+                                     opacity=0.9))
+    fig.add_trace(go.Scatter(x=roi.index, y=roi.values, name="Portfolio (you)",
+                             line=dict(color=BM_COLORS["Portfolio"], width=3.2)))
     fig.add_hline(y=0, line_dash="dash", line_color=theme.FG_DIM, line_width=1)
-    fig.update_layout(height=420, yaxis=dict(title="Cumulative ROI (%)", ticksuffix="%"),
+    fig.update_layout(height=460, yaxis=dict(title="Cumulative ROI (%)", ticksuffix="%"),
                       hovermode="x unified", legend=dict(x=0.01, y=0.99))
-    ranked = sorted([("Portfolio", float(roi.iloc[-1]))] +
+    ranked = sorted([("Portfolio (you)", float(roi.iloc[-1]))] +
                     [(n, float(s.iloc[-1])) for n, s in bms.items() if not s.empty],
                     key=lambda x: -x[1])
-    chips = " · ".join(f"{n} {_pct(v)}" for n, v in ranked)
-    return ("<h2>ROI vs benchmarks</h2>"
-            "<p class='dim'>Cash-flow matched: the same money invested in each benchmark on each "
-            "of your buy dates. Sale proceeds count as cash, so selling never looks like a loss.</p>"
-            f"<div class='chart'>{_fig_html(fig)}</div><p>{chips}</p>")
+    rows = "".join(
+        f"<tr><td>{'<b>'+n+'</b>' if n.startswith('Portfolio') else n}</td>"
+        f"<td class='num'>{_pct(v)}</td></tr>" for n, v in ranked)
+    table = f"<table><tr><th>Where the same money went</th><th class='num'>Total ROI</th></tr>{rows}</table>"
+    return (f"<h2>Your portfolio vs the same money elsewhere</h2>"
+            f"<p class='dim'>Cash-flow matched since your first trade ({start}): every euro you actually "
+            "spent on a buy is simultaneously invested — virtually — into each benchmark on that same day. "
+            "Whatever you put into Apple on a date, the Bitcoin line gets the same amount into BTC that day, and so on. "
+            "Sale proceeds count as returned cash, so selling never looks like a loss. This is the honest "
+            "real-money comparison (unlike the hypothetical rolling backtest below).</p>"
+            f"<div class='chart'>{_fig_html(fig)}</div>{table}")
 
 
 def sec_risk(d: dict) -> str:
