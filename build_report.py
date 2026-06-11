@@ -628,14 +628,14 @@ def build(d: dict, public: bool) -> str:
     body = "".join([
         f"<h1>{title}</h1><p class='dim'>generated {now} · {badge}</p>",
         sec_summary(d, public),
-        sec_weights_now(d, public),
-        sec_risk_contrib(d),
-        sec_frontier(d),
+        sec_positions(d, public),
         sec_roi(d),
         sec_risk(d),
-        sec_backtest(d),
-        sec_positions(d, public),
+        sec_risk_contrib(d),
         sec_correlation(d),
+        sec_frontier(d),
+        sec_weights_now(d, public),
+        sec_backtest(d),
         sec_explainer(),
     ])
     return f"""<!DOCTYPE html>
