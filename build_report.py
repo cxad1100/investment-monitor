@@ -613,7 +613,8 @@ def build(d: dict, public: bool) -> str:
     badge = ('<span class="dim">public build — euro amounts hidden</span>'
              if public else '<span class="dim">private build — full data</span>')
     body = "".join([
-        f"<h1>{title}</h1><p class='dim'>generated {now} · {badge}</p>",
+        f"<h1>{title}</h1><p class='dim'>generated {now} · {badge} · "
+        f"<a href='pairs.html'>Pairs Trading Lab →</a></p>",
         sec_summary(d, public),
         sec_weights_now(d, public),
         sec_risk_contrib(d),
