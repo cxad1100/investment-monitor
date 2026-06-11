@@ -57,6 +57,8 @@ def simulate_pair(py: pd.Series, px: pd.Series, signal: pd.Series, beta: float,
 
 
 def backtest_stats(equity: pd.Series, trades: list[dict], capital: float) -> dict:
+    # Idle capital earns no interest, so Sharpe is diluted by flat
+    # no-position days — conservative by design.
     rets = equity.pct_change().dropna()
     sd = float(rets.std())
     sharpe = float(rets.mean() / sd * np.sqrt(252)) if sd > 0 else 0.0

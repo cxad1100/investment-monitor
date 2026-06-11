@@ -82,7 +82,8 @@ def sec_snapshot(d: dict) -> str:
 {d['n_tested']} same-sector/same-currency candidates tested, {len(d['live'])}
 cointegrated (p &lt; {P_MAX}) with a tradeable half-life. Multiple-testing caveat:
 at p &lt; {P_MAX}, roughly {round(P_MAX * d['n_tested'])} of {d['n_tested']} tests
-pass by pure chance.</p>""")
+pass by pure chance. This snapshot is in-sample (μ/σ/β fit on this same window) —
+the backtest below is strictly out-of-sample.</p>""")
     n_signal = sum(1 for p in d["live"] if abs(p["z_now"]) >= ENTRY_Z)
     cards = [
         _card("Universe", str(len(UNIVERSE))),

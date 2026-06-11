@@ -99,8 +99,9 @@ leak the FX trend into the spread and produce spurious cointegration.
 
 ## Backtester (`pairs_backtest.py`, vectorized pandas)
 
-- Paper account: €10,000 notional. Equal capital slice per open pair, max ~5
-  concurrent positions → €2,000 per pair, €1,000 per leg.
+- Paper account: €10,000 notional. Equal capital slice per pair selected in the
+  window (as implemented: capital / n_selected, up to top-10 pairs → ≥€1,000 per
+  pair; an earlier draft said "max ~5 → €2,000 per pair").
 - **Costs per trade leg:** €1 fixed (Trade Republic order fee) + slippage as a
   half-spread estimate in bps, tiered: 5 bps US mega-caps, 10 bps DAX names,
   15 bps mid-liquidity names. Charged on entry and exit, both legs — a
