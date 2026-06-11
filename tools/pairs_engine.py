@@ -85,3 +85,42 @@ def select_pairs(prices: pd.DataFrame, candidates: list[tuple[str, str]],
         found.append(r)
     found.sort(key=lambda r: r["pvalue"])
     return {"selected": found[:top_n], "n_tested": tested}
+
+
+def pair_zscore(py: pd.Series, px: pd.Series, pair: dict) -> pd.Series:
+    """z-score of the spread using FROZEN formation params (alpha, beta, mu, sigma)."""
+    spread = np.log(py) - (pair["alpha"] + pair["beta"] * np.log(px))
+    return (spread - pair["mu"]) / pair["sigma"]
+
+
+def generate_signals(z: pd.Series, entry: float = 2.0, exit_band: float = 0.0,
+                     stop: float = 3.5) -> pd.Series:
+    """Desired spread position per close: +1 long spread, -1 short, 0 flat.
+
+    Sequential state machine — the position at t depends only on z up to t
+    (no look-ahead). Long spread = spread cheap (z <= -entry): long Y, short X.
+    Exit when z reverts through the exit band; stop when |z| >= stop —
+    cointegration treated as broken, NO re-entry for the rest of the window.
+    """
+    pos, banned, out = 0, False, []
+    for zt in z.to_numpy():
+        if np.isnan(zt):
+            out.append(pos)
+            continue
+        if pos == 0 and not banned:
+            if zt <= -entry:
+                pos = 1
+            elif zt >= entry:
+                pos = -1
+        elif pos == 1:
+            if zt <= -stop:
+                pos, banned = 0, True
+            elif zt >= -exit_band:
+                pos = 0
+        elif pos == -1:
+            if zt >= stop:
+                pos, banned = 0, True
+            elif zt <= exit_band:
+                pos = 0
+        out.append(pos)
+    return pd.Series(out, index=z.index, dtype=float)

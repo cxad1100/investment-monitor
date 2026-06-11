@@ -131,3 +131,42 @@ def test_select_pairs_respects_min_obs():
     res = select_pairs(prices, [("YYY", "XXX")], min_obs=100)
     assert res["n_tested"] == 0
     assert res["selected"] == []
+
+
+from tools.pairs_engine import generate_signals, pair_zscore
+
+
+def _z(vals):
+    return pd.Series(vals, pd.bdate_range("2024-01-01", periods=len(vals)), dtype=float)
+
+
+def test_pair_zscore_uses_frozen_params():
+    idx = pd.bdate_range("2024-01-01", periods=3)
+    py = pd.Series([np.e] * 3, idx)            # log = 1
+    px = pd.Series([1.0] * 3, idx)             # log = 0
+    pair = dict(alpha=0.0, beta=1.0, mu=0.0, sigma=0.5)
+    z = pair_zscore(py, px, pair)
+    assert np.allclose(z.values, 2.0)          # (1 - 0)/0.5
+
+
+def test_signals_long_entry_and_exit():
+    sig = generate_signals(_z([0, -2.5, -1, 0.1, 0]))
+    assert sig.tolist() == [0, 1, 1, 0, 0]
+
+
+def test_signals_short_entry_and_exit():
+    sig = generate_signals(_z([0, 2.5, 1, -0.1]))
+    assert sig.tolist() == [0, -1, -1, 0]
+
+
+def test_signals_stop_loss_bans_reentry():
+    sig = generate_signals(_z([0, 2.5, 3.6, 2.5, 2.5]))
+    assert sig.tolist() == [0, -1, 0, 0, 0]    # stopped at 3.6, no re-entry at 2.5
+
+
+def test_signals_no_lookahead():
+    rng = np.random.default_rng(11)
+    z = _z(np.cumsum(rng.normal(0, 0.6, 200)))
+    full = generate_signals(z)
+    for k in (10, 50, 150):
+        assert generate_signals(z.iloc[:k]).tolist() == full.iloc[:k].tolist()
