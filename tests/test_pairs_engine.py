@@ -93,3 +93,41 @@ def test_half_life_random_walk_is_huge():
     rw = pd.Series(np.cumsum(rng.normal(0, 1, 3000)),
                    pd.bdate_range("2012-01-02", periods=3000))
     assert half_life(rw) > 60
+
+
+from tools.pairs_engine import select_pairs, walkforward_windows
+
+
+def test_walkforward_windows_roll_without_overlap():
+    idx = pd.bdate_range("2022-01-03", periods=400)
+    wins = walkforward_windows(idx, formation_days=252, trading_days=63)
+    assert len(wins) == 3
+    for f, t in wins:
+        assert len(f) == 252
+        assert f[-1] < t[0]                     # formation strictly before trading
+    # consecutive trading windows must not overlap
+    for (_, t1), (_, t2) in zip(wins, wins[1:]):
+        assert t1[-1] < t2[0]
+
+
+def test_select_pairs_picks_cointegrated_only():
+    y, x = make_cointegrated()
+    a, b = make_independent()
+    prices = pd.concat([y, x, a, b], axis=1)
+    res = select_pairs(prices, [("YYY", "XXX"), ("AAA", "BBB")])
+    assert res["n_tested"] == 2
+    assert len(res["selected"]) == 1
+    sel = res["selected"][0]
+    assert {sel["y"], sel["x"]} == {"YYY", "XXX"}
+    # frozen params present; raw window data must NOT leak out
+    assert set(sel) >= {"alpha", "beta", "pvalue", "half_life", "mu", "sigma"}
+    assert "spread" not in sel
+    assert sel["sigma"] > 0
+
+
+def test_select_pairs_respects_min_obs():
+    y, x = make_cointegrated(n=50)
+    prices = pd.concat([y, x], axis=1)
+    res = select_pairs(prices, [("YYY", "XXX")], min_obs=100)
+    assert res["n_tested"] == 0
+    assert res["selected"] == []

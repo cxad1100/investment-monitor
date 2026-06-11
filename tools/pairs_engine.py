@@ -40,3 +40,48 @@ def half_life(spread: pd.Series) -> float:
     lag = spread.shift(1).dropna()
     rho = float(sm.OLS(ds, sm.add_constant(lag)).fit().params.iloc[1])
     return float("inf") if rho >= 0 else float(-np.log(2.0) / rho)
+
+
+def walkforward_windows(index: pd.DatetimeIndex, formation_days: int = 252,
+                        trading_days: int = 63,
+                        ) -> list[tuple[pd.DatetimeIndex, pd.DatetimeIndex]]:
+    """Formation/trading window pairs, rolled forward by trading_days.
+    Trading windows never overlap; a partial last window needs ≥ 5 days."""
+    out, start = [], 0
+    while start + formation_days + 5 <= len(index):
+        f = index[start:start + formation_days]
+        t = index[start + formation_days:start + formation_days + trading_days]
+        out.append((f, t))
+        start += trading_days
+    return out
+
+
+def select_pairs(prices: pd.DataFrame, candidates: list[tuple[str, str]],
+                 p_max: float = 0.05, hl_min: float = 2.0, hl_max: float = 60.0,
+                 top_n: int = 10, min_obs: int = 100) -> dict:
+    """Test every candidate on the formation window; return the top pairs.
+
+    Filters: cointegration p < p_max, positive hedge ratio, half-life in
+    [hl_min, hl_max] trading days. Capped at top_n by p-value to bound
+    multiple-testing damage; n_tested is reported so the report can show
+    the multiple-comparisons caveat honestly.
+    """
+    found, tested = [], 0
+    for a, b in candidates:
+        df = prices[[a, b]].dropna()
+        if len(df) < min_obs:
+            continue
+        tested += 1
+        r = engle_granger(df[a], df[b])
+        if r["pvalue"] >= p_max or r["beta"] <= 0:
+            continue
+        hl = half_life(r["spread"])
+        if not (hl_min <= hl <= hl_max):
+            continue
+        r["half_life"] = hl
+        r["mu"] = float(r["spread"].mean())
+        r["sigma"] = float(r["spread"].std())
+        del r["spread"]            # frozen params only; no window data leaks out
+        found.append(r)
+    found.sort(key=lambda r: r["pvalue"])
+    return {"selected": found[:top_n], "n_tested": tested}
