@@ -26,7 +26,8 @@ def _norm(h: pd.Series) -> pd.Series:
 def _price_on(h: pd.Series, date: pd.Timestamp) -> float | None:
     future = h[h.index >= date]
     if not future.empty:
-        return float(future.iloc[0])
+        #return float(future.iloc[0])
+        return float(future.values.flatten()[0])
     return float(h.iloc[-1]) if not h.empty else None
 
 
