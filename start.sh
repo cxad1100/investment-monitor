@@ -1,7 +1,8 @@
 #!/bin/bash
-# Build the static report and open the private version in the browser.
-# No server — output is plain HTML:
-#   local/report.html  private, full € amounts (gitignored)
-#   docs/index.html    public, percentages only (deployed via GitHub Pages)
+# Live local dashboard. Every browser refresh (or the "Update to now" button)
+# re-fetches prices and rebuilds. If a fetch fails it falls back to the last
+# good snapshot (local/report.html). Opens http://localhost:8000. Ctrl-C stops.
+#
+# Static one-shot build instead (for GitHub Pages docs/): python build_report.py
 cd "$(dirname "$0")"
-.venv/bin/python build_report.py --open
+.venv/bin/python serve.py

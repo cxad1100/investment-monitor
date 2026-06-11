@@ -13,10 +13,12 @@ import http.server
 import socketserver
 import webbrowser
 from datetime import datetime
+from pathlib import Path
 
 import build_report as B
 
 PORT = 8000
+SNAPSHOT = B.ROOT / "local/report.html"
 
 # Spinner shown while the server rebuilds; the report loads in a hidden iframe so
 # Plotly's inline scripts execute correctly, then we reveal it.
@@ -39,14 +41,21 @@ f.onerror=function(){document.getElementById('msg').textContent='Build failed �
 </script></body></html>"""
 
 # Fixed bar injected into the served report: timestamp + reload (re-triggers a build).
-def _bar() -> str:
-    ts = datetime.now().strftime("%H:%M:%S")
+def _bar(stale_msg: str = "") -> str:
+    if stale_msg:
+        label = f'<span style="color:#d7ba7d">⚠ {stale_msg}</span>'
+    else:
+        label = f'<span>live · {datetime.now():%H:%M:%S}</span>'
     return f"""<div style="position:fixed;top:0;right:0;z-index:99999;background:#252526;
 border:1px solid #2d2d2d;border-radius:0 0 0 6px;padding:6px 12px;display:flex;gap:12px;
 align-items:center;font-family:'SF Mono',ui-monospace,Menlo,monospace;font-size:12px;color:#808080">
-<span>data as of {ts}</span>
+{label}
 <a href="/" target="_top" style="color:#569cd6;text-decoration:none;font-weight:600">↻ Update to now</a>
 </div>"""
+
+
+def _inject(html: str, stale_msg: str = "") -> str:
+    return html.replace("<main>", "<main>" + _bar(stale_msg), 1)
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -65,9 +74,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
             try:
                 d = B.gather()
                 html = B.build(d, public=False)
-                html = html.replace("<main>", "<main>" + _bar(), 1)
+                SNAPSHOT.write_text(html)          # keep last-good snapshot fresh
+                html = _inject(html)
+                print("  ok — live")
             except Exception as e:
-                html = f"<body style='background:#1e1e1e;color:#d16969;font-family:monospace;padding:40px'>build failed: {e}</body>"
+                # Live fetch failed → fall back to the last static snapshot.
+                print(f"  fetch failed ({e}); serving last snapshot")
+                if SNAPSHOT.exists():
+                    when = datetime.fromtimestamp(SNAPSHOT.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+                    html = _inject(SNAPSHOT.read_text(), stale_msg=f"offline — snapshot {when}")
+                else:
+                    html = ("<body style='background:#1e1e1e;color:#d16969;font-family:monospace;"
+                            f"padding:40px'>live fetch failed and no snapshot exists yet:<br>{e}</body>")
             self._send(html)
         else:
             self._send(LOADER)
