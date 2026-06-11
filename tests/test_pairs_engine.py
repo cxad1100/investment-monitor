@@ -5,6 +5,7 @@ import pandas as pd
 import pytest
 
 from tools.pairs_universe import UNIVERSE, candidate_pairs
+from tools.pairs_engine import engle_granger
 
 
 def test_universe_entries_complete():
@@ -28,3 +29,49 @@ def test_candidate_pairs_same_sector_and_currency():
 def test_candidate_pairs_count_reasonable():
     n = len(candidate_pairs())
     assert 30 <= n <= 80                      # ~52 with the curated universe
+
+
+def make_cointegrated(n=750, seed=42, beta=0.8, alpha=0.5, phi=0.7, noise=0.02):
+    """Price pair sharing a random-walk driver:
+    log x = random walk; log y = alpha + beta*log x + AR(1) noise."""
+    rng = np.random.default_rng(seed)
+    lx = np.cumsum(rng.normal(0, 0.01, n)) + np.log(100)
+    eps = np.zeros(n)
+    for i in range(1, n):
+        eps[i] = phi * eps[i - 1] + rng.normal(0, noise)
+    ly = alpha + beta * lx + eps
+    idx = pd.bdate_range("2022-01-03", periods=n)
+    return (pd.Series(np.exp(ly), idx, name="YYY"),
+            pd.Series(np.exp(lx), idx, name="XXX"))
+
+
+def make_independent(n=750, seed=7):
+    """Two unrelated random walks — correlated by luck at most, never cointegrated."""
+    rng = np.random.default_rng(seed)
+    idx = pd.bdate_range("2022-01-03", periods=n)
+    a = pd.Series(np.exp(np.cumsum(rng.normal(0, 0.01, n)) + np.log(100)), idx, name="AAA")
+    b = pd.Series(np.exp(np.cumsum(rng.normal(0, 0.01, n)) + np.log(100)), idx, name="BBB")
+    return a, b
+
+
+def test_detects_cointegrated_pair():
+    y, x = make_cointegrated()
+    r = engle_granger(y, x)
+    assert r["pvalue"] < 0.05
+    assert r["beta"] > 0
+    assert {r["y"], r["x"]} == {"YYY", "XXX"}
+    assert set(r) >= {"y", "x", "alpha", "beta", "pvalue", "spread"}
+
+
+def test_rejects_independent_walks():
+    a, b = make_independent()
+    r = engle_granger(a, b)
+    assert r["pvalue"] >= 0.05
+
+
+def test_spread_is_ols_residual():
+    y, x = make_cointegrated()
+    r = engle_granger(y, x)
+    # residual of OLS with constant has (near-)zero mean by construction
+    assert abs(r["spread"].mean()) < 1e-10
+    assert len(r["spread"]) == len(y)
