@@ -422,3 +422,29 @@ def compute_correlation_matrix(holdings: dict, ticker_map: dict) -> dict:
             return corr.to_dict()
         except Exception:
             return {}
+
+
+def xirr(flows: list[tuple], bracket=(-0.9999, 10.0)) -> float | None:
+    """
+    Money-weighted (internal) rate of return, annualised, from dated cash flows.
+
+    flows: list of (datetime.date, amount). Convention: money OUT of pocket is
+    negative (buys), money IN is positive (sells + today's portfolio value).
+    Solves Sum cf_i / (1+r)^(days_i/365) = 0 for r. None if no sign change.
+    """
+    from scipy.optimize import brentq
+    if len(flows) < 2:
+        return None
+    t0 = min(d for d, _ in flows)
+    years = [(d - t0).days / 365.0 for d, _ in flows]
+    amts = [float(a) for _, a in flows]
+    if not (min(amts) < 0 < max(amts)):
+        return None
+
+    def npv(r):
+        return sum(a / (1 + r) ** y for a, y in zip(amts, years))
+
+    try:
+        return float(brentq(npv, *bracket, maxiter=200))
+    except Exception:
+        return None

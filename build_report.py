@@ -9,7 +9,7 @@ Public build hides: euro values, share counts, costs, transactions.
 
 import argparse
 import webbrowser
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
 
 import numpy as np
@@ -17,6 +17,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from tools import theme
+from tools import equity_log
 from tools.portfolio_tools import (
     COMPANY_NAMES as NAMES,
     parse_portfolio,
@@ -27,6 +28,7 @@ from tools.portfolio_analytics import (
     build_roi_timeseries,
     compute_quant_metrics,
     compute_correlation_matrix,
+    xirr,
 )
 from tools.portfolio_tools import TICKER_MAP
 from tools.optimizer import (
@@ -86,8 +88,42 @@ def gather() -> dict:
     summary = compute_portfolio_summary(portfolio, prices)
     positions = [p for p in summary["positions"] if p["position_value"] > 0]
     txns = portfolio["transactions"]
-    deployed = sum(t["price"] for t in txns if t["action"] == "buy")
+    tot = summary["totals"]
 
+    # ── Transparent accounting — every line reconciles to the next ──────────────
+    gross_deposits = sum(t["price"] for t in txns if t["action"] == "buy")
+    cash_returned  = sum(t["price"] for t in txns if t["action"] == "sell")
+    realized       = tot["realized_pnl"]
+    cost_of_sold   = cash_returned - realized          # cost basis of shares sold
+    net_cost_basis = gross_deposits - cost_of_sold     # cost basis still at work (open)
+    current_value  = tot["current_value"]              # live market value of open
+    unrealized     = current_value - net_cost_basis
+    total_pnl      = realized + unrealized
+    net_invested   = gross_deposits - cash_returned    # out-of-pocket cash
+    simple_roi     = total_pnl / gross_deposits * 100 if gross_deposits else 0.0
+
+    # Money-weighted return (XIRR): dated cash flows, buys negative, value today positive
+    flows = [(date.fromisoformat(t["date"]), -t["price"] if t["action"] == "buy" else t["price"])
+             for t in txns]
+    flows.append((date.today(), current_value))
+    mwr = xirr(flows)
+    hold_years = (date.today() - min(f[0] for f in flows)).days / 365.0
+    mwr_cumulative = ((1 + mwr) ** hold_years - 1) * 100 if mwr is not None else None
+
+    acct = dict(gross_deposits=gross_deposits, cash_returned=cash_returned, realized=realized,
+                cost_of_sold=cost_of_sold, net_cost_basis=net_cost_basis,
+                current_value=current_value, unrealized=unrealized, total_pnl=total_pnl,
+                net_invested=net_invested, simple_roi=simple_roi, mwr=mwr,
+                mwr_cumulative=mwr_cumulative, hold_years=hold_years)
+
+    # Log today's snapshot (auditable daily equity series; gitignored local/)
+    equity_log.append_snapshot(ROOT / "local/equity_log.csv", dict(
+        date=str(date.today()), current_value=round(current_value, 2),
+        net_cost_basis=round(net_cost_basis, 2), gross_deposits=round(gross_deposits, 2),
+        cash_returned=round(cash_returned, 2), realized_pnl=round(realized, 2),
+        unrealized_pnl=round(unrealized, 2), total_pnl=round(total_pnl, 2)))
+
+    deployed = gross_deposits  # back-compat alias
     roi_series, bm_series = build_roi_timeseries(txns)
     metrics = compute_quant_metrics(roi_series, bm_series.get("S&P 500"))
     correlation = compute_correlation_matrix(portfolio["holdings"], TICKER_MAP)
@@ -142,6 +178,7 @@ def gather() -> dict:
             ytd = ((1 + float(this_year.iloc[-1]) / 100) / base - 1) * 100
 
     return dict(positions=positions, summary=summary, deployed=deployed, txns=txns,
+                acct=acct,
                 roi_series=roi_series, bm_series=bm_series, metrics=metrics,
                 correlation=correlation, universe=universe, sig=sig,
                 cov_ann=cov_ann, cur_w=cur_w, tot_val=tot_val, mkt_w=mkt_w,
@@ -153,23 +190,94 @@ def gather() -> dict:
 
 # ── Sections ──────────────────────────────────────────────────────────────────
 
+def _eur(x, signed=False):
+    s = f"€{x:+,.2f}" if signed else f"€{x:,.2f}"
+    cls = "pos" if (signed and x > 0) else ("neg" if (signed and x < 0) else "")
+    return f'<span class="mono {cls}">{s}</span>'
+
+
+def _ledger(title, rows, total):
+    """rows: list of (label, value_html, op) where op ∈ {'', '+', '−', '='}."""
+    body = ""
+    for label, val, op in rows:
+        opc = f"<span class='dim' style='display:inline-block;width:1em'>{op}</span>"
+        bold = " style='font-weight:600;border-top:1px solid #2d2d2d'" if op == "=" else ""
+        body += f"<tr{bold}><td>{opc}{label}</td><td class='num'>{val}</td></tr>"
+    return f"<h3>{title}</h3><table class='ledger'>{body}</table>"
+
+
 def sec_summary(d: dict, public: bool) -> str:
-    tot = d["summary"]["totals"]
-    ret = tot["total_pnl"] / d["deployed"] * 100 if d["deployed"] else 0
+    a = d["acct"]
+    m = d["metrics"]
+
+    # ── Headline cards (returns, always shown) ──────────────────────────────────
     cards = []
     if not public:
-        cards.append(_card("Value", f"€{tot['current_value']:,.0f}"))
-        pnl_cls = "pos" if tot["total_pnl"] >= 0 else "neg"
-        cards.append(_card("Total P&L", f'<span class="{pnl_cls}">€{tot["total_pnl"]:+,.0f}</span>'))
-        cards.append(_card("Deployed", f"€{d['deployed']:,.0f}"))
-    cards.append(_card("Total Return", _pct(ret)))
+        cards.append(_card("Current Value", _eur(a["current_value"])))
+        cards.append(_card("Total P&L", _eur(a["total_pnl"], signed=True)))
+    cards.append(_card("Simple ROI", _pct(a["simple_roi"])))
+    if a["mwr"] is not None:
+        cards.append(_card("Money-Weighted (IRR)", f'{_pct(a["mwr"]*100)}<span class="dim"> /yr</span>'))
     cards.append(_card("YTD", _pct(d["ytd"]) if d["ytd"] is not None else "—"))
-    m = d["metrics"]
     if m:
         cards.append(_card("Sharpe", f'{m["sharpe"]:.2f}'))
         cards.append(_card("Max Drawdown", _pct(m["max_drawdown"])))
     cards.append(_card("Positions", str(len(d["positions"]))))
-    return f'<div class="cards">{"".join(cards)}</div>'
+    out = ["<h2>Summary</h2>", f'<div class="cards">{"".join(cards)}</div>']
+
+    if public:
+        out.append("<p class='dim'>Euro amounts hidden in the public build. "
+                   "<b>Simple ROI</b> = total profit ÷ all capital ever deployed (cumulative). "
+                   "<b>Money-Weighted (IRR)</b> = annualised internal rate of return on your actual "
+                   "dated cash flows. <b>YTD</b> = calendar-year return.</p>")
+        return "".join(out)
+
+    # ── Transparent accounting waterfall (private only) ─────────────────────────
+    out.append("<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px'>")
+    out.append("<div>" + _ledger("Capital flow (cash)", [
+        ("Gross deposits — all buys", _eur(a["gross_deposits"]), ""),
+        ("Cash returned — all sells", _eur(-a["cash_returned"], signed=True), "−"),
+        ("Net invested (out of pocket)", _eur(a["net_invested"]), "="),
+    ], None) + "</div>")
+    out.append("<div>" + _ledger("Position accounting (where it is now)", [
+        ("Net cost basis (open positions)", _eur(a["net_cost_basis"]), ""),
+        ("Unrealized P&L", _eur(a["unrealized"], signed=True), "+"),
+        ("Current market value", _eur(a["current_value"]), "="),
+    ], None) + "</div>")
+    out.append("<div>" + _ledger("Profit &amp; loss (where it came from)", [
+        ("Realized P&L (closed trades)", _eur(a["realized"], signed=True), ""),
+        ("Unrealized P&L (open positions)", _eur(a["unrealized"], signed=True), "+"),
+        ("Total P&L", _eur(a["total_pnl"], signed=True), "="),
+    ], None) + "</div>")
+    out.append("</div>")
+
+    # Returns, fully labelled
+    mwr_line = ""
+    if a["mwr"] is not None:
+        mwr_line = (f"<tr><td>Money-Weighted Return (XIRR)</td>"
+                    f"<td class='num'>{_pct(a['mwr']*100)} <span class='dim'>/yr</span></td>"
+                    f"<td class='dim'>IRR on dated cash flows; ≈{_pct(a['mwr_cumulative'])} over "
+                    f"{a['hold_years']:.1f}y. Rewards deploying early.</td></tr>")
+    out.append(
+        "<h3>Returns — what each percentage means</h3><table>"
+        f"<tr><td>Simple ROI</td><td class='num'>{_pct(a['simple_roi'])}</td>"
+        f"<td class='dim'>Total P&amp;L ÷ gross deposits = "
+        f"{_eur(a['total_pnl'], signed=True)} ÷ {_eur(a['gross_deposits'])}. Cumulative, "
+        "ignores timing.</td></tr>"
+        f"{mwr_line}"
+        f"<tr><td>YTD (calendar)</td><td class='num'>{_pct(d['ytd']) if d['ytd'] is not None else '—'}</td>"
+        "<td class='dim'>This calendar year, flow-adjusted from the daily equity series.</td></tr>"
+        "</table>")
+
+    out.append(
+        f"<div class='note'>Two cash 'net' figures differ on purpose: <b>net invested</b> "
+        f"({_eur(a['net_invested'])}) is out-of-pocket; <b>net cost basis</b> "
+        f"({_eur(a['net_cost_basis'])}) is the cost still at work in open positions. The "
+        f"{_eur(a['net_cost_basis']-a['net_invested'], signed=True)} gap is realized profit "
+        f"({_eur(a['realized'], signed=True)}) you already banked, which lowered your out-of-pocket "
+        "below cost basis. Cash returned from sells = cost of those shares "
+        f"({_eur(a['cost_of_sold'])}) + realized gain ({_eur(a['realized'], signed=True)}).</div>")
+    return "".join(out)
 
 
 def sec_weights_now(d: dict, public: bool) -> str:
@@ -477,10 +585,28 @@ two BL portfolios run standard max-Sharpe / same-risk optimization on Π instead
 <p>(portfolio return − {RF:.1%}) ÷ volatility = return per unit of risk. The {RF:.1%} cash rate is a
 fixed offset — it shifts every Sharpe equally, so it never changes the <i>ranking</i> of portfolios;
 it only sets the bar that "doing nothing" (holding cash) clears.</p></details>
-<details><summary>Portfolio ROI (one formula everywhere)</summary>
-<p>ROI = (value of holdings + cash from sells) ÷ total of all buys − 1. Benchmarks use the same cash
-flows: every euro you spent buys the benchmark instead — "what if each purchase had gone into the
-S&amp;P?"</p></details>
+<details><summary>Simple ROI vs Money-Weighted Return (IRR)</summary>
+<p><b>Simple ROI</b> = Total P&amp;L ÷ gross deposits. One cumulative number; it ignores <i>when</i>
+you invested — a euro deployed on day 1 and a euro deployed yesterday count equally.</p>
+<p><b>Money-Weighted Return (XIRR)</b> = the single annualised rate r that makes the present value of
+every dated cash flow (each buy negative, each sell positive, today's value positive) sum to zero. It
+rewards deploying capital early and is the honest "what return did my actual money earn per year."</p>
+<p>They answer different questions, so they don't match — and neither is the time-weighted return a
+fund reports (TWR strips out your deposit timing to judge the <i>strategy</i>; that needs a clean
+daily equity series, see below).</p></details>
+<details><summary>The accounting identity (why the numbers tie out)</summary>
+<p>Gross deposits − cost basis of shares sold = <b>net cost basis</b> (open). Net cost basis +
+unrealized P&amp;L = <b>current value</b>. Realized + unrealized = <b>total P&amp;L</b>. Cash returned
+from a sale = that share's cost basis + its realized gain — which is why net invested cash sits below
+net cost basis by exactly the realized profit you've banked.</p></details>
+<details><summary>Daily equity logging (for exact YTD / calendar returns)</summary>
+<p>Today YTD is <i>reconstructed</i>: holdings are repriced on every past business day from yfinance
+history. Correct, but recomputed each run and vulnerable to data revisions/splits. The robust upgrade
+is an append-only <b>daily equity log</b> (<code>local/equity_log.csv</code>, written every build):
+date, value, net cost basis, deposits, withdrawals, realized/unrealized. With it, calendar-year return
+becomes a flow-adjusted TWR — chain daily returns rᵢ = (Vᵢ − netflowᵢ)/Vᵢ₋₁ and compound across the
+year, so mid-year deposits never masquerade as performance. A daily cron/launchd job appending one row
+makes the series authoritative instead of reconstructed.</p></details>
 <details><summary>Risk metrics</summary>
 <ul>
 <li><b>Max drawdown</b> — worst peak-to-trough fall of the value curve.</li>
