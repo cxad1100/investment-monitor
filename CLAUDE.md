@@ -37,6 +37,12 @@ build_report.py                   ← data → optimizer → HTML (section funct
  ├─ tools/optimizer.py            ← Markowitz (scipy SLSQP), pure functions
  ├─ tools/portfolio_meta.py       ← sector map, ETF decomposition (sector_exposure_matrix)
  └─ tools/theme.py                ← VSCode Dark+ palette, plotly "vsdark" template, REPORT_CSS
+
+build_pairs_report.py             ← pairs-trading engine → local/pairs.html + docs/pairs.html
+ ├─ tools/pairs_universe.py       ← curated LS-Exchange universe + price cache (CSV in data/)
+ ├─ tools/pairs_engine.py         ← Engle-Granger, half-life, z-score signals (pure functions)
+ ├─ tools/pairs_backtest.py       ← walk-forward backtester, costs + slippage, cost sensitivity
+ └─ tools/report_html.py          ← shared HTML helpers (used by both reports)
 ```
 
 Optimizer settings are constants at the top of `build_report.py`
@@ -55,6 +61,18 @@ Optimizer settings are constants at the top of `build_report.py`
   is Optimized vs Equal-Weight, and the caveat box must stay.
 - Two weight recommendations: **A** `optimize(objective="sharpe")`,
   **B** `max_return_at_vol(vol_cap=current portfolio vol)`.
+
+## Pairs engine invariants
+
+- Walk-forward only: α/β/μ/σ are estimated on the formation window and frozen;
+  signals on day t execute at close t+1. Tests assert truncating future data
+  changes nothing in the past.
+- Cointegration p-values come from `statsmodels.tsa.stattools.coint`
+  (correct Engle-Granger critical values), never plain `adfuller` on residuals.
+- Candidate pairs: same sector AND same currency only (FX leaks cause spurious
+  cointegration).
+- Cost-sensitivity (0×/1×/2×) re-prices identical signals — selection and
+  signals must never depend on the cost multiplier.
 
 ## Key maps (`tools/portfolio_tools.py`)
 
