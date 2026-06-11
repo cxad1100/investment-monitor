@@ -6,6 +6,7 @@ import pytest
 
 from tools.pairs_universe import UNIVERSE, candidate_pairs
 from tools.pairs_engine import engle_granger
+from tools.pairs_engine import half_life
 
 
 def test_universe_entries_complete():
@@ -75,3 +76,20 @@ def test_spread_is_ols_residual():
     # residual of OLS with constant has (near-)zero mean by construction
     assert abs(r["spread"].mean()) < 1e-10
     assert len(r["spread"]) == len(y)
+
+
+def test_half_life_known_ar1():
+    # AR(1) with phi=0.9: Δs = (phi-1)·s + ε, so HL ≈ ln2/0.1 ≈ 6.9 days
+    rng = np.random.default_rng(3)
+    s = np.zeros(5000)
+    for i in range(1, 5000):
+        s[i] = 0.9 * s[i - 1] + rng.normal(0, 1)
+    hl = half_life(pd.Series(s, pd.bdate_range("2010-01-04", periods=5000)))
+    assert 5.5 < hl < 8.5
+
+
+def test_half_life_random_walk_is_huge():
+    rng = np.random.default_rng(4)
+    rw = pd.Series(np.cumsum(rng.normal(0, 1, 3000)),
+                   pd.bdate_range("2012-01-02", periods=3000))
+    assert half_life(rw) > 60

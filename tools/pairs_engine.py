@@ -31,3 +31,12 @@ def engle_granger(a: pd.Series, b: pd.Series) -> dict:
             best = dict(y=str(y.name), x=str(x.name), alpha=alpha, beta=beta,
                         pvalue=pval, spread=spread)
     return best
+
+
+def half_life(spread: pd.Series) -> float:
+    """Mean-reversion half-life in trading days from an AR(1) fit:
+    Δs_t = c + ρ·s_{t-1} + ε  →  HL = −ln2/ρ. Non-reverting (ρ ≥ 0) → inf."""
+    ds = spread.diff().dropna()
+    lag = spread.shift(1).dropna()
+    rho = float(sm.OLS(ds, sm.add_constant(lag)).fit().params.iloc[1])
+    return float("inf") if rho >= 0 else float(-np.log(2.0) / rho)
