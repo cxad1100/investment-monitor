@@ -17,6 +17,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from tools import theme
+from tools.report_html import fig_html, pct, card, page
 from tools import equity_log
 from tools.portfolio_tools import (
     COMPANY_NAMES as NAMES,
@@ -63,21 +64,7 @@ BL_VIEWS: list[dict] = []
 ROOT = Path(__file__).parent
 
 
-def _fig_html(fig: go.Figure) -> str:
-    return fig.to_html(full_html=False, include_plotlyjs=False,
-                       config={"displayModeBar": False})
-
-
-def _pct(x, signed=True, nd=1):
-    if x is None:
-        return "—"
-    s = f"{x:+.{nd}f}%" if signed else f"{x:.{nd}f}%"
-    cls = "pos" if x > 0 else ("neg" if x < 0 else "")
-    return f'<span class="{cls} mono">{s}</span>'
-
-
-def _card(label: str, value: str) -> str:
-    return f'<div class="card"><div class="k">{label}</div><div class="v">{value}</div></div>'
+_fig_html, _pct, _card = fig_html, pct, card
 
 
 # ── Data assembly ─────────────────────────────────────────────────────────────
@@ -638,13 +625,7 @@ def build(d: dict, public: bool) -> str:
         sec_correlation(d),
         sec_explainer(),
     ])
-    return f"""<!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{title}</title>
-<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-<style>{theme.REPORT_CSS}</style>
-</head><body><main>{body}</main></body></html>"""
+    return page(title, body)
 
 
 def main():
