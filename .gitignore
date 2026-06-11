@@ -9,3 +9,4 @@ __pycache__/
 .claude/
 docs/superpowers/
 CLAUDE.md
+data/pairs_prices.csv

@@ -87,4 +87,6 @@ td.num, th.num {{ text-align: right; }}
 .chart {{ margin: 8px 0 4px; }}
 details {{ margin: 10px 0; }}
 summary {{ cursor: pointer; color: {ACCENT}; font-size: 0.9rem; }}
+a {{ color: {ACCENT}; text-decoration: none; }}
+a:hover {{ text-decoration: underline; }}
 """
