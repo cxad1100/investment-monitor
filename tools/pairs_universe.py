@@ -1,12 +1,16 @@
-"""Curated stock universe for the pairs-trading engine.
+"""Tradeable stock/ETF universe for the pairs-trading engine.
 
-Every name is tradeable on Lang & Schwarz Exchange (Trade Republic).
+UNIVERSE is loaded from data/universe_meta.csv — the liquidity-filtered,
+sector-tagged subset of the ~15k LS-Exchange / Frankfurt names in
+data/universe_raw.csv, built by `python -m tools.build_universe`. When that
+CSV is absent, a small curated set (_CURATED) is used as a fallback.
+
 Candidate pairs are restricted to same sector AND same currency —
 cross-currency pairs leak the FX trend into the spread and produce
 spurious cointegration.
 
-slippage_bps = assumed half-spread cost per traded leg:
-5 bps US mega-caps, 10 bps DAX names, 15 bps mid-liquidity names.
+slippage_bps = assumed half-spread cost per traded leg, tiered by daily
+turnover (see tools.build_universe._slippage_bps).
 """
 
 from itertools import combinations
@@ -17,7 +21,12 @@ import yfinance as yf
 
 ROOT = Path(__file__).resolve().parent.parent
 
-UNIVERSE: dict[str, dict] = {
+META_CSV = ROOT / "data" / "universe_meta.csv"
+
+# Fallback curated universe, used only when data/universe_meta.csv is absent.
+# The live universe is normally the liquidity-filtered, sector-tagged set built
+# by `python -m tools.build_universe` from data/universe_raw.csv.
+_CURATED: dict[str, dict] = {
     # US banks
     "JPM": dict(sector="US Banks", currency="USD", slippage_bps=5),
     "BAC": dict(sector="US Banks", currency="USD", slippage_bps=5),
@@ -60,11 +69,35 @@ UNIVERSE: dict[str, dict] = {
 }
 
 
+def _load_universe() -> dict[str, dict]:
+    """UNIVERSE from data/universe_meta.csv if present, else the curated set."""
+    if not META_CSV.exists():
+        return _CURATED
+    df = pd.read_csv(META_CSV)
+    out: dict[str, dict] = {}
+    for r in df.itertuples(index=False):
+        out[r.ticker] = dict(sector=str(r.sector), currency=str(r.currency),
+                             slippage_bps=int(r.slippage_bps),
+                             name=str(getattr(r, "name", r.ticker)))
+    return out
+
+
+UNIVERSE: dict[str, dict] = _load_universe()
+
+# Buckets that lump unrelated names together — pairing inside them produces
+# spurious cointegration. yfinance leaves no sector for some .F stock lines
+# (MSFT.F, Tencent…) and no category for .F ETF lines. Keep them tradeable in
+# UNIVERSE but never pair them.
+_NO_PAIR_SECTORS = {"Unknown", "ETF — Uncategorized"}
+
+
 def candidate_pairs() -> list[tuple[str, str]]:
-    """All ticker pairs sharing sector AND currency."""
+    """All ticker pairs sharing sector AND currency (excluding junk sectors)."""
     out = []
     for a, b in combinations(sorted(UNIVERSE), 2):
         ua, ub = UNIVERSE[a], UNIVERSE[b]
+        if ua["sector"] in _NO_PAIR_SECTORS:
+            continue
         if ua["sector"] == ub["sector"] and ua["currency"] == ub["currency"]:
             out.append((a, b))
     return out

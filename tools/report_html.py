@@ -29,4 +29,20 @@ def page(title: str, body: str) -> str:
 <title>{title}</title>
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <style>{theme.REPORT_CSS}</style>
-</head><body><main>{body}</main></body></html>"""
+</head><body><main>{body}</main>
+<script>
+// Plotly measures legend text width at first paint; if the webfont paints a beat
+// later the legend clip box is left one-char wide (truncated labels). Redraw once
+// fonts are ready (and after full load) so widths are remeasured.
+(function(){{
+  function redraw(){{
+    if(!window.Plotly) return;
+    document.querySelectorAll('.js-plotly-plot').forEach(function(g){{
+      try{{ Plotly.redraw(g); }}catch(e){{}}
+    }});
+  }}
+  if(document.fonts&&document.fonts.ready) document.fonts.ready.then(redraw);
+  window.addEventListener('load',function(){{ setTimeout(redraw,150); }});
+}})();
+</script>
+</body></html>"""

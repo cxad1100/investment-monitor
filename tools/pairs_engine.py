@@ -68,11 +68,21 @@ def select_pairs(prices: pd.DataFrame, candidates: list[tuple[str, str]],
     """
     found, tested = [], 0
     for a, b in candidates:
-        df = prices[[a, b]].dropna()
+        # log-prices need strictly positive, finite values. Some .F lines carry
+        # NaN gaps or stray 0/negative prints that would feed inf into the OLS.
+        df = prices[[a, b]].replace([np.inf, -np.inf], np.nan).dropna()
+        df = df[(df > 0).all(axis=1)]
         if len(df) < min_obs:
             continue
+        # A flat/illiquid .F line (never trades) has zero variance → the OLS
+        # residual is constant and coint's ADF rejects it. Skip degenerate series.
+        if df[a].std() == 0 or df[b].std() == 0:
+            continue
         tested += 1
-        r = engle_granger(df[a], df[b])
+        try:
+            r = engle_granger(df[a], df[b])
+        except Exception:
+            continue                # singular OLS / collinear / pathological window
         if r["pvalue"] >= p_max or r["beta"] <= 0:
             continue
         hl = half_life(r["spread"])

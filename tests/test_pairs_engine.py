@@ -4,32 +4,45 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from tools.pairs_universe import UNIVERSE, candidate_pairs
+import tools.pairs_universe as pu
+from tools.pairs_universe import UNIVERSE, candidate_pairs, _CURATED
 from tools.pairs_engine import engle_granger
 from tools.pairs_engine import half_life
 
 
 def test_universe_entries_complete():
+    # Live UNIVERSE may come from data/universe_meta.csv (extra "name" key,
+    # liquidity-tiered slippage incl. 25 bps). Assert the engine-required keys.
     for tk, meta in UNIVERSE.items():
+        assert {"sector", "currency", "slippage_bps"} <= set(meta), tk
+        assert isinstance(meta["currency"], str) and meta["currency"]
+        assert isinstance(meta["slippage_bps"], int) and meta["slippage_bps"] > 0
+
+
+def test_curated_fallback_well_formed():
+    for tk, meta in _CURATED.items():
         assert set(meta) == {"sector", "currency", "slippage_bps"}, tk
         assert meta["currency"] in ("USD", "EUR")
         assert meta["slippage_bps"] in (5, 10, 15)
 
 
 def test_candidate_pairs_same_sector_and_currency():
+    # Source-agnostic invariant: every emitted pair shares sector AND currency,
+    # and none crosses either. Checked against the live UNIVERSE.
     pairs = candidate_pairs()
-    assert ("BAC", "JPM") in pairs            # same sector, same currency
     for a, b in pairs:
         assert UNIVERSE[a]["sector"] == UNIVERSE[b]["sector"]
         assert UNIVERSE[a]["currency"] == UNIVERSE[b]["currency"]
-    # never cross-sector or cross-currency
-    assert ("NVDA", "SIE.DE") not in pairs
-    assert ("JPM", "DBK.DE") not in pairs
 
 
-def test_candidate_pairs_count_reasonable():
-    n = len(candidate_pairs())
-    assert 30 <= n <= 80                      # ~52 with the curated universe
+def test_candidate_pairs_curated_counts(monkeypatch):
+    # Pin the pairing logic against the deterministic curated set.
+    monkeypatch.setattr(pu, "UNIVERSE", _CURATED)
+    pairs = pu.candidate_pairs()
+    assert ("BAC", "JPM") in pairs            # same sector, same currency
+    assert ("NVDA", "SIE.DE") not in pairs    # cross-sector
+    assert ("JPM", "DBK.DE") not in pairs     # cross-currency
+    assert 30 <= len(pairs) <= 80             # ~52 with the curated universe
 
 
 def make_cointegrated(n=750, seed=42, beta=0.8, alpha=0.5, phi=0.7, noise=0.02):
