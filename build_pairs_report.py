@@ -166,9 +166,11 @@ signals with t+1 execution. Capital is split equally across that window's pairs.
                                  line=dict(color=colors.get(m, "#aaa"),
                                            width=2.4 if m == 1.0 else 1.4)))
     fig.add_hline(y=0, line_dash="dash", line_color=theme.FG_DIM, line_width=1)
-    fig.update_layout(height=400, yaxis=dict(title="Cumulative return (%)",
+    fig.update_layout(height=425, yaxis=dict(title="Cumulative return (%)",
                                              ticksuffix="%"),
-                      hovermode="x unified", legend=dict(x=0.01, y=0.99))
+                      hovermode="x unified", margin=dict(t=58),
+                      legend=dict(orientation="h", yanchor="bottom", y=1.02,
+                                  xanchor="left", x=0, font=dict(size=11)))
     out.append(f"<div class='chart'>{fig_html(fig)}</div>")
 
     cards = [

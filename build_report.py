@@ -409,9 +409,11 @@ def sec_frontier(d: dict) -> str:
     pt(d["w_hrp"], "HRP", "hexagon", "#9cdcfe")
     pt(d["w_bl_sharpe"], "BL Max-Sharpe", "star", "#dcdcaa")
     pt(d["w_bl_same"], "BL Same-Risk", "diamond", "#4ec9b0")
-    fig.update_layout(height=440, xaxis_title="Volatility (annual %)",
+    fig.update_layout(height=470, xaxis_title="Volatility (annual %)",
                       yaxis_title="Expected return — Black-Litterman implied (annual %)",
-                      legend=dict(x=0.01, y=0.99))
+                      margin=dict(t=58),
+                      legend=dict(orientation="h", yanchor="bottom", y=1.02,
+                                  xanchor="left", x=0, font=dict(size=11)))
     return ("<h2>Efficient frontier</h2>"
             "<p class='dim'>Each grey dot is a random mix of your assets. The white line is the "
             "frontier — best return at every risk level. The vertical axis uses Black-Litterman "
@@ -439,8 +441,10 @@ def sec_roi(d: dict) -> str:
     fig.add_trace(go.Scatter(x=roi.index, y=roi.values, name="Portfolio (you)",
                              line=dict(color=BM_COLORS["Portfolio"], width=3.2)))
     fig.add_hline(y=0, line_dash="dash", line_color=theme.FG_DIM, line_width=1)
-    fig.update_layout(height=460, yaxis=dict(title="Cumulative ROI (%)", ticksuffix="%"),
-                      hovermode="x unified", legend=dict(x=0.01, y=0.99))
+    fig.update_layout(height=485, yaxis=dict(title="Cumulative ROI (%)", ticksuffix="%"),
+                      hovermode="x unified", margin=dict(t=58),
+                      legend=dict(orientation="h", yanchor="bottom", y=1.02,
+                                  xanchor="left", x=0, font=dict(size=11)))
     ranked = sorted([("Portfolio (you)", float(roi.iloc[-1]))] +
                     [(n, float(s.iloc[-1])) for n, s in bms.items() if not s.empty],
                     key=lambda x: -x[1])
@@ -487,8 +491,10 @@ def sec_backtest(d: dict) -> str:
                                  line=dict(color=colors.get(name, "#aaa"),
                                            width=2.4 if name == "Optimized" else 1.5)))
     fig.add_hline(y=0, line_dash="dash", line_color=theme.FG_DIM)
-    fig.update_layout(height=400, yaxis=dict(title="Cumulative ROI (%)", ticksuffix="%"),
-                      hovermode="x unified", legend=dict(x=0.01, y=0.99))
+    fig.update_layout(height=425, yaxis=dict(title="Cumulative ROI (%)", ticksuffix="%"),
+                      hovermode="x unified", margin=dict(t=58),
+                      legend=dict(orientation="h", yanchor="bottom", y=1.02,
+                                  xanchor="left", x=0, font=dict(size=11)))
 
     sp = roi.get("S&P 500")
     rows = []
