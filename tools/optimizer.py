@@ -17,6 +17,8 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 from scipy.optimize import minimize
+from scipy.cluster.hierarchy import linkage
+from scipy.spatial.distance import squareform
 
 from tools.portfolio_tools import TICKER_MAP
 from tools.portfolio_meta import sector_exposure_matrix
@@ -158,6 +160,77 @@ def risk_parity(cov_ann: pd.DataFrame, *, max_w: float = 1.0) -> np.ndarray | No
     bounds = tuple((1e-4, max_w) for _ in range(n))   # tiny floor keeps risk-contrib defined
     cons = [{"type": "eq", "fun": lambda w: w.sum() - 1.0}]
     return _solve(obj, n, bounds, cons, x0=np.repeat(1.0 / n, n))
+
+
+def hrp(cov_ann: pd.DataFrame) -> np.ndarray | None:
+    """Hierarchical Risk Parity (López de Prado): allocate risk top-down across
+    a correlation-clustered tree. Covariance-only, no return forecast, long-only,
+    weights sum to 1. Unlike Risk-Parity it has no per-asset cap — clustering
+    controls concentration naturally (correlated mega-caps are treated as one
+    risk unit), which is the whole point.
+
+    Returns weights as an ndarray in cov_ann.index order (matches risk_parity).
+    """
+    sig = cov_ann.values if hasattr(cov_ann, "values") else np.asarray(cov_ann, float)
+    n = sig.shape[0]
+    if n == 0:
+        return None
+    if n == 1:
+        return np.array([1.0])
+
+    # correlation → distance d_ij = sqrt(0.5*(1 - corr_ij))
+    std = np.sqrt(np.diag(sig))
+    corr = sig / np.outer(std, std)
+    corr = np.clip(corr, -1.0, 1.0)
+    dist = np.sqrt(np.maximum(0.5 * (1.0 - corr), 0.0))
+
+    # 1. tree clustering on the condensed distance matrix
+    link = linkage(squareform(dist, checks=False), method="single")
+
+    # 2. quasi-diagonalization: recover the leaf order from the dendrogram
+    order = _hrp_quasi_diag(link, n)
+
+    # 3. recursive bisection: split risk budget down the tree (inverse-variance)
+    ivp_var = np.diag(sig)
+    w = pd.Series(1.0, index=order)
+    clusters = [order]
+    while clusters:
+        clusters = [c[half:] if j else c[:half]            # bisect each cluster
+                    for c in clusters if len(c) > 1
+                    for half in (len(c) // 2,) for j in (0, 1)]
+        for i in range(0, len(clusters), 2):
+            left, right = clusters[i], clusters[i + 1]
+            v_left = _hrp_cluster_var(sig, ivp_var, left)
+            v_right = _hrp_cluster_var(sig, ivp_var, right)
+            alpha = 1.0 - v_left / (v_left + v_right)
+            w[left] *= alpha
+            w[right] *= 1.0 - alpha
+
+    return w.reindex(range(n)).values    # back to cov_ann.index order
+
+
+def _hrp_quasi_diag(link: np.ndarray, n: int) -> list[int]:
+    """Leaf order of the dendrogram so correlated assets sit adjacent."""
+    link = link.astype(int)
+    order = [link[-1, 0], link[-1, 1]]
+    while max(order) >= n:                                  # expand merged nodes
+        new = []
+        for node in order:
+            if node < n:
+                new.append(node)
+            else:
+                m = node - n
+                new.extend([link[m, 0], link[m, 1]])
+        order = new
+    return order
+
+
+def _hrp_cluster_var(sig: np.ndarray, ivp_var: np.ndarray, idx: list[int]) -> float:
+    """Variance of a cluster under inverse-variance weights (the bisection metric)."""
+    sub = sig[np.ix_(idx, idx)]
+    iv = 1.0 / ivp_var[idx]
+    w = iv / iv.sum()
+    return float(w @ sub @ w)
 
 
 def implied_equilibrium_returns(cov_ann: pd.DataFrame, market_weights, delta: float = 2.5) -> pd.Series:

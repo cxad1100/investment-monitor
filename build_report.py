@@ -40,6 +40,7 @@ from tools.optimizer import (
     optimize,
     risk_parity,
     risk_contributions,
+    hrp,
     black_litterman,
     max_return_at_vol,
     efficient_frontier,
@@ -143,6 +144,7 @@ def gather() -> dict:
     # Covariance-only (no return forecast)
     w_minvar = optimize(mean_ann, cov_ann, objective="min_var", rf=RF, **kw)
     w_rp     = risk_parity(cov_ann, max_w=MAX_W)
+    w_hrp    = hrp(cov_ann)   # uncapped by design — clustering controls concentration
     # Black-Litterman return-based
     w_bl_sharpe = optimize(mean_bl, cov_ann, objective="sharpe", rf=RF, **kw)
     w_bl_same   = max_return_at_vol(mean_bl, cov_ann, cur_vol, **kw)
@@ -171,7 +173,8 @@ def gather() -> dict:
                 cov_ann=cov_ann, cur_w=cur_w, tot_val=tot_val, mkt_w=mkt_w,
                 mu_bl=mu_bl, pi=pi.values, cur_rc=cur_rc,
                 cur_perf=(cur_ret, cur_vol, cur_sharpe),
-                w_minvar=w_minvar, w_rp=w_rp, w_bl_sharpe=w_bl_sharpe, w_bl_same=w_bl_same,
+                w_minvar=w_minvar, w_rp=w_rp, w_hrp=w_hrp,
+                w_bl_sharpe=w_bl_sharpe, w_bl_same=w_bl_same,
                 frontier=frontier, cloud=cloud, backtest=backtest, ytd=ytd)
 
 
@@ -277,13 +280,15 @@ def sec_weights_now(d: dict, public: bool) -> str:
     out.append(f"""
 <div class="note">
 None of these use trailing returns as a forecast (that's the part that doesn't work).
-The two <b>robust</b> portfolios use only the <b>covariance matrix</b> — how your assets move
+The three <b>robust</b> portfolios use only the <b>covariance matrix</b> — how your assets move
 together — which is statistically stable. The two <b>Black-Litterman</b> portfolios get expected
 returns from <b>market-cap weights</b> (what the market collectively bets), not from your assets'
-recent winning streaks. All are long-only, max {MAX_W:.0%} per position, weights sum to 100%.
+recent winning streaks. All are long-only and sum to 100%. Min-Var and Risk-Parity (and both BL
+portfolios) cap each position at max {MAX_W:.0%}; <b>HRP is uncapped by design</b> — its clustering
+controls concentration instead of an arbitrary limit.
 </div>""")
 
-    cols = [("Min-Var", d["w_minvar"]), ("Risk-Parity", d["w_rp"]),
+    cols = [("Min-Var", d["w_minvar"]), ("Risk-Parity", d["w_rp"]), ("HRP", d["w_hrp"]),
             ("BL Max-Sharpe", d["w_bl_sharpe"]), ("BL Same-Risk", d["w_bl_same"])]
     head = "<tr><th>Ticker</th><th>Name</th><th class='num'>Current</th>" + \
         "".join(f"<th class='num'>{c[0]}</th>" for c in cols) + \
@@ -325,6 +330,12 @@ recent winning streaks. All are long-only, max {MAX_W:.0%} per position, weights
                           "Every asset contributes the same share of total portfolio risk — no single "
                           "name dominates your risk. The institutional answer to 'I don't trust return "
                           "forecasts'.", eur=True))
+    out.append(perf_cards(d["w_hrp"], "Hierarchical Risk Parity (HRP)",
+                          "Clusters your assets by correlation, then splits risk down the tree. "
+                          "Recognises that the US mega-caps move together and treats them as one risk "
+                          "unit, so they can't individually dominate — diversification without a single "
+                          "hardcoded cap, and it doesn't lean into mega-caps the way Black-Litterman "
+                          "does.", eur=True))
 
     out.append("<h3 style='color:#569cd6'>Black-Litterman — market-implied returns</h3>")
     out.append(perf_cards(d["w_bl_sharpe"], "BL Max-Sharpe",
@@ -395,6 +406,7 @@ def sec_frontier(d: dict) -> str:
     pt(d["cur_w"], "Current", "circle", "#c586c0")
     pt(d["w_minvar"], "Min-Var", "square", "#6a9955")
     pt(d["w_rp"], "Risk-Parity", "triangle-up", "#b5cea8")
+    pt(d["w_hrp"], "HRP", "hexagon", "#9cdcfe")
     pt(d["w_bl_sharpe"], "BL Max-Sharpe", "star", "#dcdcaa")
     pt(d["w_bl_same"], "BL Same-Risk", "diamond", "#4ec9b0")
     fig.update_layout(height=440, xaxis_title="Volatility (annual %)",
@@ -562,6 +574,21 @@ volatility (long-only, ≤{MAX_W:.0%} each, sum 100%). Needs only covariance.</p
 <p><b>Risk Parity</b>: weights chosen so every asset contributes an equal share of total risk.
 Risk contribution of asset i = wᵢ × (Σw)ᵢ ⁄ portfolio variance. Also covariance-only — this is what
 risk-parity and minimum-volatility funds (e.g. the USMV ETF) actually do.</p></details>
+<details><summary>Hierarchical Risk Parity — the fix for mega-cap bias (no cap needed)</summary>
+<p>Black-Litterman has a built-in tilt: it derives expected returns from market-cap weights
+(Π = δ·Σ·w_market), so because US mega-cap tech dominates global market cap, the math hands those names
+a proportionally huge implied return and starves smaller, non-US holdings. That's not geographic bias —
+it's the cap-weight multiplier. The crude fix is a hardcoded cap ("max 20% per country"), but that just
+overrides the math with human guesswork.</p>
+<p><b>HRP</b> (Marcos López de Prado) solves it structurally, using <i>only</i> the covariance matrix —
+no return forecast, no cap. Three steps: (1) turn correlations into distances
+(dᵢⱼ = √(½(1−ρᵢⱼ))) and run <b>hierarchical clustering</b> — an unsupervised-ML algorithm that groups
+assets that move together; (2) <b>quasi-diagonalize</b> — reorder so correlated names sit adjacent;
+(3) <b>recursive bisection</b> — walk down the cluster tree splitting the risk budget by inverse
+variance at each fork. Because Apple/Nvidia/Google land in one cluster, they share a single risk
+budget and can't each dominate — you get deep diversification without typing a single
+<code>max_weight</code>. It's how real funds get concentration control out of the predictable part of
+the data (risk) instead of the unpredictable part (returns).</p></details>
 <details><summary>Black-Litterman (a return model that isn't momentum)</summary>
 <p>Instead of past returns, reverse the optimization: given the market's cap-weighted mix, what
 expected returns would make that mix optimal? <b>Π = δ · Σ · w_market</b> (δ = {BL_DELTA} risk

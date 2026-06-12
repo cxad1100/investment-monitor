@@ -13,6 +13,7 @@ from tools.optimizer import (
     to_returns,
     risk_parity,
     risk_contributions,
+    hrp,
     implied_equilibrium_returns,
     black_litterman,
 )
@@ -119,6 +120,38 @@ def test_risk_contributions_sum_to_one(synth):
     w = np.array([0.5, 0.3, 0.2])
     rc = risk_contributions(w, cov_ann)
     assert abs(rc.sum() - 1.0) < 1e-9
+
+
+def test_hrp_weights_sum_to_one(synth):
+    _, cov_ann = synth
+    w = hrp(cov_ann)
+    assert w is not None
+    assert abs(w.sum() - 1.0) < 1e-6
+
+
+def test_hrp_long_only(synth):
+    _, cov_ann = synth
+    w = hrp(cov_ann)
+    assert (w >= 0).all()
+
+
+def test_hrp_length_matches_universe(synth):
+    _, cov_ann = synth
+    assert len(hrp(cov_ann)) == cov_ann.shape[0]
+
+
+def test_hrp_deconcentrates_correlated_cluster():
+    """Two tightly-correlated high-vol assets + one uncorrelated low-vol asset.
+    HRP must treat the correlated pair as one risk unit, not let it dominate."""
+    sig = pd.DataFrame(
+        np.array([[0.040, 0.038, 0.000],
+                  [0.038, 0.045, 0.000],
+                  [0.000, 0.000, 0.010]]),
+        index=list("ABC"), columns=list("ABC"))
+    w = hrp(sig)
+    assert abs(w.sum() - 1.0) < 1e-9
+    assert w[0] + w[1] < 0.75          # correlated A+B share one budget, don't dominate
+    assert w[2] > 0.25                 # low-vol uncorrelated C is not crushed
 
 
 def test_implied_returns_recover_market_view(synth):
