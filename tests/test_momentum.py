@@ -129,3 +129,34 @@ def test_equal_weight_curve_starts_at_capital():
     c = equal_weight_curve(px, ["A", "B"], window, capital=10_000.0)
     assert abs(c.iloc[0] - 10_000.0) < 1e-6
     assert c.iloc[-1] > c.iloc[0]
+
+
+import re
+
+import build_momentum_report as bmr
+
+
+def _fake_gather():
+    idx = pd.bdate_range("2019-01-01", periods=400)
+    rng = np.random.default_rng(3)
+    px = pd.DataFrame({f"T{i}": 100.0 * np.exp(np.cumsum(rng.normal(0.0004, 0.01, 400)))
+                       for i in range(20)}, index=idx)
+    slip = {t: 10 for t in px.columns}
+    from tools.momentum import run_momentum
+    res = run_momentum(px, slip, k=5, cost_mults=(0.0, 1.0, 2.0), capital=10_000.0)
+    return dict(res=res, prices=px, benchmarks=pd.DataFrame(index=idx), capital=10_000.0,
+                meta={t: dict(name=t, local_id="000", country="X", sector="Y") for t in px.columns})
+
+
+def test_public_report_has_no_euro_amounts():
+    d = _fake_gather()
+    html = bmr.build(d, public=True)
+    euros = re.findall(r"€[0-9][0-9.,]*", html)
+    assert all(e == "€1" for e in euros), euros
+
+
+def test_private_report_builds_nonempty():
+    d = _fake_gather()
+    html = bmr.build(d, public=False)
+    assert "<html" in html.lower() and "momentum" in html.lower()
+    assert "Sharpe" in html
