@@ -139,7 +139,9 @@ def equal_weight_curve(prices: pd.DataFrame, tickers: list[str], window,
                        capital: float) -> pd.Series:
     """Equity of an equal-weight buy-hold basket of `tickers` over `window`,
     normalized to `capital` at the start — the 'hold everything equally'
-    honesty benchmark."""
+    honesty benchmark. Empty `tickers` → empty Series (matches momentum_scores)."""
+    if not tickers:
+        return pd.Series(dtype=float)
     sub = prices.reindex(window)[tickers].ffill().dropna(how="all")
     norm = sub / sub.iloc[0]                          # each name -> 1.0 at start
     port = norm.mean(axis=1)                          # equal weight

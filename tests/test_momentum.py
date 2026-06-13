@@ -131,6 +131,12 @@ def test_equal_weight_curve_starts_at_capital():
     assert c.iloc[-1] > c.iloc[0]
 
 
+def test_equal_weight_curve_empty_tickers_returns_empty():
+    idx = pd.bdate_range("2021-01-01", periods=10)
+    px = pd.DataFrame({"A": np.linspace(100, 110, 10)}, index=idx)
+    assert equal_weight_curve(px, [], idx, capital=10_000.0).empty
+
+
 import re
 
 import build_momentum_report as bmr
