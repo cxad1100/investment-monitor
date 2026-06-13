@@ -2,7 +2,27 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from tools.momentum import rebalance_dates, momentum_scores
+from tools.momentum import rebalance_dates, momentum_scores, eligible, select_topk
+
+
+def test_eligible_drops_illiquid_and_short_history():
+    idx = pd.bdate_range("2020-01-01", periods=300)
+    px = pd.DataFrame({
+        "LIQ":   np.linspace(100, 110, 300),         # ok
+        "WIDE":  np.linspace(100, 110, 300),         # too-wide spread
+        "SHORT": [np.nan] * 250 + list(np.linspace(100, 110, 50)),  # short history
+    }, index=idx)
+    slip = {"LIQ": 10, "WIDE": 80, "SHORT": 10}
+    elig = eligible(px, idx[-1], slip, liq_max=30, min_obs=273)
+    assert elig == {"LIQ"}
+
+
+def test_select_topk_ranks_and_respects_eligibility():
+    scores = pd.Series({"A": 0.5, "B": 0.9, "C": 0.1, "D": 0.7})
+    picks = select_topk(scores, {"A", "B", "C", "D"}, k=2)
+    assert picks == ["B", "D"]                       # highest two, ordered
+    picks2 = select_topk(scores, {"A", "C"}, k=5)    # eligibility limits pool
+    assert picks2 == ["A", "C"]                       # k larger than pool is fine
 
 
 def test_rebalance_dates_monthly_count():

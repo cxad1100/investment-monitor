@@ -38,3 +38,23 @@ def momentum_scores(prices: pd.DataFrame, asof, lookback: int = 252,
     base = hist.iloc[-(lookback + 1)]            # ~lookback days before asof
     scores = recent / base - 1.0
     return scores.replace([np.inf, -np.inf], np.nan).dropna()
+
+
+def eligible(prices: pd.DataFrame, asof, slippage_bps: dict,
+             liq_max: int = 30, min_obs: int = 273) -> set[str]:
+    """Tradeable names at `asof`: tight half-spread, enough history, valid price."""
+    hist = prices.loc[:asof]
+    out: set[str] = set()
+    for t in prices.columns:
+        if slippage_bps.get(t, 10**9) > liq_max:
+            continue
+        col = hist[t].dropna()
+        if len(col) >= min_obs and float(col.iloc[-1]) > 0:
+            out.add(t)
+    return out
+
+
+def select_topk(scores: pd.Series, eligible_set: set[str], k: int) -> list[str]:
+    """Top-k tickers by score, restricted to the eligible set, highest first."""
+    s = scores[[t for t in scores.index if t in eligible_set]]
+    return list(s.sort_values(ascending=False).head(k).index)
