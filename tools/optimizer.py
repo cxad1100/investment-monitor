@@ -279,7 +279,13 @@ def black_litterman(cov_ann: pd.DataFrame, market_weights, *, delta: float = 2.5
 
 
 def fetch_market_caps(tr_tickers: list[str]) -> dict[str, float]:
-    """Market cap per ticker (totalAssets for ETFs). Frankfurt listings carry caps too."""
+    """Single-stock market cap per ticker (Frankfurt listings carry caps too).
+
+    Deliberately ignores ETF ``totalAssets``: an ETF's AUM (tens of billions) is
+    dwarfed by trillion-euro single-stock caps, so including it crushes a
+    diversified ETF to ~0% in the Black-Litterman prior. ETFs return no cap here
+    and the caller falls back to position value instead.
+    """
     out = {}
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -287,7 +293,9 @@ def fetch_market_caps(tr_tickers: list[str]) -> dict[str, float]:
             yft = TICKER_MAP.get(tk, tk)
             try:
                 info = yf.Ticker(yft).info
-                cap = info.get("marketCap") or info.get("totalAssets")
+                if info.get("quoteType") in ("ETF", "MUTUALFUND", "INDEX"):
+                    continue                      # fund — caller uses position value
+                cap = info.get("marketCap")
                 if cap and cap > 0:
                     out[tk] = float(cap)
             except Exception:

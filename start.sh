@@ -1,8 +1,11 @@
 #!/bin/bash
-# Live local dashboard. Every browser refresh (or the "Update to now" button)
-# re-fetches prices and rebuilds. If a fetch fails it falls back to the last
-# good snapshot (local/report.html). Opens http://localhost:8000. Ctrl-C stops.
+# Live local dashboard — the primary way to view the reports. Serves both pages
+# (portfolio monitor + Pairs Trading Lab). A normal refresh is instant (builds
+# from the on-disk data buffer); the "↻ Update to now" button forces a live
+# re-fetch. A failed fetch keeps the last-good values and flags staleness.
+# Opens http://localhost:8000. Ctrl-C stops.
 #
-# Static one-shot build instead (for GitHub Pages docs/): python build_report.py
+# The static build is only for the public GitHub Pages snapshot (docs/):
+#   .venv/bin/python build_report.py   &&   .venv/bin/python build_pairs_report.py
 cd "$(dirname "$0")"
 .venv/bin/python serve.py

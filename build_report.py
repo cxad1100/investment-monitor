@@ -19,10 +19,14 @@ import plotly.graph_objects as go
 from tools import theme
 from tools.report_html import fig_html, pct, card, page
 from tools import equity_log
+from tools.data_buffer import (
+    cached_current_prices,
+    cached_market_caps,
+    cached_price_history,
+)
 from tools.portfolio_tools import (
     COMPANY_NAMES as NAMES,
     parse_portfolio,
-    fetch_current_prices,
     compute_portfolio_summary,
 )
 from tools.portfolio_analytics import (
@@ -70,9 +74,9 @@ _fig_html, _pct, _card = fig_html, pct, card
 
 # ── Data assembly ─────────────────────────────────────────────────────────────
 
-def gather() -> dict:
+def gather(force: bool = False) -> dict:
     portfolio = parse_portfolio(ROOT / "input/portfolio.csv")
-    prices = fetch_current_prices(portfolio["holdings"])
+    prices, stale, as_of = cached_current_prices(portfolio["holdings"], force=force)
     summary = compute_portfolio_summary(portfolio, prices)
     positions = [p for p in summary["positions"] if p["position_value"] > 0]
     txns = portfolio["transactions"]
@@ -118,7 +122,8 @@ def gather() -> dict:
 
     # Optimizer inputs
     tickers = [p["ticker"] for p in positions]
-    hist = fetch_price_history(tickers, period="5y")
+    hist = cached_price_history(tickers, period="5y")   # TTL only — daily data,
+                                                        # "Update to now" re-pulls live prices, not 5y history
     rets = to_returns(hist)
     universe = [t for t in tickers if t in rets.columns]
     window = rets.loc[rets.index >= rets.index[-1] - pd.Timedelta(days=LOOKBACK_DAYS)]
@@ -130,8 +135,13 @@ def gather() -> dict:
     cur_w = np.array([val[t] / tot_val for t in universe])
 
     # ── Market-cap weights → Black-Litterman implied returns (the return model) ──
-    caps = fetch_market_caps(universe)
-    cap_vec = np.array([caps.get(t, val[t]) for t in universe])   # ETF/missing → position value
+    caps = cached_market_caps(universe)                 # TTL only (caps barely move)
+    # ETFs/missing names have no single-stock cap (and an ETF's AUM is on a wildly
+    # different scale than trillion-€ stocks). Give them the MEDIAN fetched cap so
+    # they sit as a typical holding in the prior — never crushed to ~0, never dominant.
+    avail = [caps[t] for t in universe if t in caps]
+    fallback = float(np.median(avail)) if avail else 1.0
+    cap_vec = np.array([caps.get(t, fallback) for t in universe])
     mkt_w = cap_vec / cap_vec.sum()
     pi = black_litterman(cov_ann, mkt_w, delta=BL_DELTA, tau=BL_TAU, views=BL_VIEWS)
     mean_bl = RF + pi                       # total expected return = rf + implied excess
@@ -175,7 +185,8 @@ def gather() -> dict:
                 cur_perf=(cur_ret, cur_vol, cur_sharpe),
                 w_minvar=w_minvar, w_rp=w_rp, w_hrp=w_hrp,
                 w_bl_sharpe=w_bl_sharpe, w_bl_same=w_bl_same,
-                frontier=frontier, cloud=cloud, backtest=backtest, ytd=ytd)
+                frontier=frontier, cloud=cloud, backtest=backtest, ytd=ytd,
+                stale=stale, as_of=as_of)
 
 
 # ── Sections ──────────────────────────────────────────────────────────────────
@@ -397,10 +408,12 @@ def sec_frontier(d: dict) -> str:
         if w is None:
             return
         r, v, s = portfolio_perf(np.array(w), mu, sig, RF)
-        fig.add_trace(go.Scatter(x=[v * 100], y=[r * 100], mode="markers+text",
+        # markers only — identity comes from the legend above the plot; in-plot
+        # text labels collided when points clustered (Current/BL/Risk-Parity).
+        fig.add_trace(go.Scatter(x=[v * 100], y=[r * 100], mode="markers",
                                  marker=dict(size=15, color=color, symbol=symbol,
                                              line=dict(width=1, color="#000")),
-                                 text=[name], textposition="top center", name=name,
+                                 name=name,
                                  hovertemplate=f"{name}: Sharpe {s:.2f}<extra></extra>"))
 
     pt(d["cur_w"], "Current", "circle", "#c586c0")
@@ -600,7 +613,11 @@ the data (risk) instead of the unpredictable part (returns).</p></details>
 expected returns would make that mix optimal? <b>Π = δ · Σ · w_market</b> (δ = {BL_DELTA} risk
 aversion). These "implied" returns are the market's collective forecast. You can layer your own views
 on top (Black-Litterman blends them by confidence); with no views the report uses pure Π. Then the
-two BL portfolios run standard max-Sharpe / same-risk optimization on Π instead of on history.</p></details>
+two BL portfolios run standard max-Sharpe / same-risk optimization on Π instead of on history.</p>
+<p class="dim">Cap weights use each stock's market cap. An <b>ETF</b> (e.g. IWDA) has no single-stock
+cap, and yfinance reports none — so it's given the <i>median</i> of the fetched stock caps, i.e.
+treated as a typical-sized holding rather than crushed to ~0%. A diversified ETF in the prior also
+double-counts the stocks it holds — a known limitation of cap-weighted BL on a mixed stock+ETF book.</p></details>
 <details><summary>Sharpe ratio &amp; the risk-free rate</summary>
 <p>(portfolio return − {RF:.1%}) ÷ volatility = return per unit of risk. The {RF:.1%} cash rate is a
 fixed offset — it shifts every Sharpe equally, so it never changes the <i>ranking</i> of portfolios;

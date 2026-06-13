@@ -116,9 +116,10 @@ def fetch_prices(tickers: list[str] | None = None, years: int = 5,
     cache = cache or ROOT / "data" / "pairs_prices.csv"
     if cache.exists() and not refresh:
         df = pd.read_csv(cache, index_col=0, parse_dates=True)
-        age = (pd.Timestamp.today().normalize() - df.index[-1]).days
-        if set(tickers) <= set(df.columns) and age <= 3:
-            return df[tickers]
+        if len(df) and set(tickers) <= set(df.columns):       # guard empty/corrupt cache
+            age = (pd.Timestamp.today().normalize() - df.index[-1]).days
+            if age <= 3:
+                return df[tickers]
     raw = yf.download(tickers, period=f"{years}y", auto_adjust=True, progress=False)
     close = raw["Close"] if "Close" in raw else raw
     if close.index.tz is not None:

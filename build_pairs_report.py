@@ -40,7 +40,9 @@ ROOT = Path(__file__).parent
 
 # ── Data assembly ─────────────────────────────────────────────────────────────
 
-def gather(refresh: bool = False) -> dict:
+def gather(force: bool = False, refresh: bool | None = None) -> dict:
+    # `force` is the live-server convention; `refresh` kept for the CLI flag.
+    refresh = force if refresh is None else refresh
     prices = fetch_prices(refresh=refresh)
     cands = candidate_pairs()
     slip = {t: UNIVERSE[t]["slippage_bps"] for t in UNIVERSE}
