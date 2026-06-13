@@ -65,3 +65,42 @@ def test_momentum_scores_insufficient_history_empty():
     idx = pd.bdate_range("2020-01-01", periods=100)
     px = pd.DataFrame({"A": _rw(2, 100)}, index=idx)
     assert momentum_scores(px, idx[-1], lookback=252, skip=21).empty
+
+
+from tools.momentum import run_momentum
+
+
+def _multi(seed=1, n=400, ncols=20):
+    rng = np.random.default_rng(seed)
+    idx = pd.bdate_range("2019-01-01", periods=n)
+    cols = {f"T{i}": 100.0 * np.exp(np.cumsum(rng.normal(0.0003, 0.01, n)))
+            for i in range(ncols)}
+    return pd.DataFrame(cols, idx)
+
+
+def test_run_momentum_cost_monotonic_same_schedule():
+    px = _multi()
+    slip = {t: 10 for t in px.columns}
+    r = run_momentum(px, slip, k=5, cost_mults=(0.0, 1.0, 2.0))
+    n0 = r["runs"][0.0]["stats"]["net_return"]
+    n1 = r["runs"][1.0]["stats"]["net_return"]
+    n2 = r["runs"][2.0]["stats"]["net_return"]
+    assert n0 >= n1 >= n2                              # more cost -> lower net
+    assert len(r["holdings_log"]) >= 2                 # schedule is cost-independent
+    assert all(len(h["picks"]) <= 5 for h in r["holdings_log"])
+
+
+def test_run_momentum_equity_starts_at_capital():
+    px = _multi()
+    slip = {t: 10 for t in px.columns}
+    r = run_momentum(px, slip, k=5, capital=10_000.0, cost_mults=(1.0,))
+    eq = r["runs"][1.0]["equity"]
+    assert abs(eq.iloc[0] - 10_000.0) < 1e-6
+    assert "stats" in r["runs"][1.0] and "sharpe" in r["runs"][1.0]["stats"]
+
+
+def test_run_momentum_no_history_returns_empty_schedule():
+    idx = pd.bdate_range("2020-01-01", periods=100)
+    px = pd.DataFrame({"A": np.linspace(100, 110, 100)}, index=idx)
+    r = run_momentum(px, {"A": 10}, k=5, cost_mults=(1.0,))
+    assert r["holdings_log"] == []

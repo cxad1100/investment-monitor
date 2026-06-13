@@ -58,3 +58,62 @@ def select_topk(scores: pd.Series, eligible_set: set[str], k: int) -> list[str]:
     """Top-k tickers by score, restricted to the eligible set, highest first."""
     s = scores[[t for t in scores.index if t in eligible_set]]
     return list(s.sort_values(ascending=False).head(k).index)
+
+
+def run_momentum(prices: pd.DataFrame, slippage_bps: dict, *, k: int = 15,
+                 lookback: int = 252, skip: int = 21, capital: float = 10_000.0,
+                 cost_mults: tuple = (0.0, 1.0, 2.0), freq: str = "M",
+                 liq_max: int = 30, fee_eur: float = 1.0) -> dict:
+    """Walk-forward momentum backtest.
+
+    Returns {"runs": {mult: {equity, trades, stats}}, "holdings_log": [...],
+             "start": iso}. The schedule (holdings_log) is cost-independent;
+    each cost multiple compounds the same equal-weight daily returns minus a
+    rebalance cost drag.
+    """
+    dates = [d for d in rebalance_dates(prices.index, freq)
+             if len(prices.loc[:d]) >= lookback + 1]
+    holdings_log = []
+    for i in range(len(dates) - 1):
+        d = dates[i]
+        scores = momentum_scores(prices, d, lookback, skip)
+        elig = eligible(prices, d, slippage_bps, liq_max, lookback + skip)
+        picks = select_topk(scores, elig, k)
+        holdings_log.append(dict(date=d, next=dates[i + 1], picks=picks,
+                                 scores={t: float(scores[t]) for t in picks}))
+
+    runs = {}
+    for m in cost_mults:
+        equity_val = capital
+        eq_points = [(prices.index[0], capital)]
+        trades = []
+        prev: set[str] = set()
+        for h in holdings_log:
+            d, nxt, picks = h["date"], h["next"], h["picks"]
+            if not picks:
+                prev = set()
+                continue
+            w = equity_val / len(picks)                 # equal notional per name
+            traded = (set(picks) ^ prev)                # enters + exits
+            cost = sum(fee_eur + slippage_bps.get(t, liq_max) / 1e4 * w
+                       for t in traded) * m
+            equity_val -= cost
+            seg = prices.loc[d:nxt, picks]
+            rets = seg.pct_change().iloc[1:].fillna(0.0)
+            port_ret = rets.mean(axis=1)                # equal-weight daily return
+            for day, r in port_ret.items():
+                equity_val *= (1.0 + r)
+                eq_points.append((day, equity_val))
+            for t in picks:
+                name_ret = float(seg[t].iloc[-1] / seg[t].iloc[0] - 1.0)
+                c = (fee_eur + slippage_bps.get(t, liq_max) / 1e4 * w) * m \
+                    if t in traded else 0.0
+                trades.append(dict(pair=t, entry=d, exit=nxt, days=len(seg) - 1,
+                                   gross=w * name_ret, costs=c,
+                                   net=w * name_ret - c, capital=w))
+            prev = set(picks)
+        equity = pd.Series(dict(eq_points)).sort_index()
+        runs[m] = dict(equity=equity, trades=trades,
+                       stats=backtest_stats(equity, trades, capital))
+    return {"runs": runs, "holdings_log": holdings_log,
+            "start": str(dates[0].date()) if dates else None}
