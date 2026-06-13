@@ -21,14 +21,23 @@ from urllib.parse import urlparse, parse_qs
 
 import build_report as B
 import build_pairs_report as P
+import build_momentum_report as M
 
 PORT = 8000
 
 # route → loader path, live build path, last-good snapshot file
 PAGES = {
-    "main":  dict(loader="/",      build="/report",       snap=B.ROOT / "local/report.html"),
-    "pairs": dict(loader="/pairs", build="/pairs-report", snap=B.ROOT / "local/pairs.html"),
+    "main":     dict(loader="/",         build="/report",          snap=B.ROOT / "local/report.html"),
+    "pairs":    dict(loader="/pairs",    build="/pairs-report",    snap=P.ROOT / "local/pairs.html"),
+    "momentum": dict(loader="/momentum", build="/momentum-report", snap=M.ROOT / "local/momentum.html"),
 }
+
+# cross-page nav links shown in the top bar, in display order
+_NAV = [
+    ("main",     "/",         "Portfolio"),
+    ("pairs",    "/pairs",    "Pairs Lab"),
+    ("momentum", "/momentum", "Momentum"),
+]
 
 
 def _loader(build_path: str) -> str:
@@ -57,10 +66,12 @@ def _bar(page: str, as_of: str | None = None, stale: dict | None = None,
          stale_msg: str = "", note: str = "") -> str:
     """Fixed top bar injected into a served report: status + nav + force-refresh."""
     force_url = PAGES[page]["loader"] + "?force=1"
-    if page == "main":
-        nav_href, nav_label = "/pairs", "Pairs Lab →"
-    else:
-        nav_href, nav_label = "/", "← Portfolio"
+    link = "color:#569cd6;text-decoration:none;font-weight:600"
+    nav_links = " · ".join(
+        f'<a href="{href}" target="_top" style="{link}">{label}</a>' if name != page
+        else f'<span style="color:#d4d4d4">{label}</span>'
+        for name, href, label in _NAV
+    )
 
     if stale_msg:                                          # genuine failure (warning)
         status = f'<span style="color:#d7ba7d">⚠ {stale_msg}</span>'
@@ -75,12 +86,11 @@ def _bar(page: str, as_of: str | None = None, stale: dict | None = None,
     else:
         status = f'<span>live · {datetime.now():%H:%M:%S}</span>'
 
-    link = "color:#569cd6;text-decoration:none;font-weight:600"
     return f"""<div style="position:fixed;top:0;right:0;z-index:99999;background:#252526;
 border:1px solid #2d2d2d;border-radius:0 0 0 6px;padding:6px 12px;display:flex;gap:14px;
 align-items:center;font-family:'SF Mono',ui-monospace,Menlo,monospace;font-size:12px;color:#808080">
 {status}
-<a href="{nav_href}" target="_top" style="{link}">{nav_label}</a>
+{nav_links}
 <a href="{force_url}" target="_top" style="{link}">↻ Update to now</a>
 </div>"""
 
@@ -90,6 +100,7 @@ def _inject(html: str, page: str, as_of: str | None = None,
     # Rewrite the static cross-links the build emits into server routes that
     # break out of the loader iframe.
     html = (html.replace("href='pairs.html'", "href='/pairs' target='_top'")
+                .replace("href='momentum.html'", "href='/momentum' target='_top'")
                 .replace("href='report.html'", "href='/' target='_top'")
                 .replace("href='index.html'", "href='/' target='_top'"))
     return html.replace("<main>", "<main>" + _bar(page, as_of, stale, stale_msg, note), 1)
@@ -121,9 +132,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 d = B.gather(force=force)
                 html = B.build(d, public=False)
                 stale, as_of = d.get("stale"), d.get("as_of")
-            else:
+            elif page == "pairs":
                 d = P.gather(force=force)
                 html = P.build(d, public=False)
+                stale, as_of = None, None
+            else:
+                d = M.gather(force=force)
+                html = M.build(d, public=False)
                 stale, as_of = None, None
             cfg["snap"].write_text(html)            # keep last-good snapshot fresh
             html = _inject(html, page, as_of=as_of, stale=stale)
@@ -148,10 +163,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(_loader("/report" + ("?force=1" if force else "")))
         elif path == "/pairs":
             self._send(_loader("/pairs-report" + ("?force=1" if force else "")))
+        elif path == "/momentum":
+            self._send(_loader("/momentum-report" + ("?force=1" if force else "")))
         elif path == "/report":
             self._serve_report("main", force)
         elif path == "/pairs-report":
             self._serve_report("pairs", force)
+        elif path == "/momentum-report":
+            self._serve_report("momentum", force)
         else:
             self.send_error(404)
 
