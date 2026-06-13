@@ -22,3 +22,19 @@ def rebalance_dates(index, freq: str = "M") -> list[pd.Timestamp]:
     actual_freq = "ME" if freq == "M" else freq
     last = pd.Series(idx, index=idx).resample(actual_freq).last().dropna()
     return list(last)
+
+
+def momentum_scores(prices: pd.DataFrame, asof, lookback: int = 252,
+                    skip: int = 21) -> pd.Series:
+    """12-1 momentum per ticker: price(asof-skip) / price(asof-lookback) - 1.
+
+    Uses only rows with index <= asof (no look-ahead). Returns an empty Series
+    when there is not yet `lookback`+1 rows of history. inf/NaN dropped.
+    """
+    hist = prices.loc[:asof]
+    if len(hist) < lookback + 1:
+        return pd.Series(dtype=float)
+    recent = hist.iloc[-(skip + 1)]              # ~skip days before asof
+    base = hist.iloc[-(lookback + 1)]            # ~lookback days before asof
+    scores = recent / base - 1.0
+    return scores.replace([np.inf, -np.inf], np.nan).dropna()
