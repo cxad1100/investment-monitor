@@ -78,7 +78,9 @@ def _load_universe() -> dict[str, dict]:
     for r in df.itertuples(index=False):
         out[r.ticker] = dict(sector=str(r.sector), currency=str(r.currency),
                              slippage_bps=int(r.slippage_bps),
-                             name=str(getattr(r, "name", r.ticker)))
+                             name=str(getattr(r, "name", r.ticker)),
+                             country=str(getattr(r, "country", "—")),
+                             local_id=str(getattr(r, "local_id", "")))
     return out
 
 
@@ -91,14 +93,34 @@ UNIVERSE: dict[str, dict] = _load_universe()
 _NO_PAIR_SECTORS = {"Unknown", "ETF — Uncategorized"}
 
 
-def candidate_pairs() -> list[tuple[str, str]]:
-    """All ticker pairs sharing sector AND currency (excluding junk sectors)."""
-    out = []
-    for a, b in combinations(sorted(UNIVERSE), 2):
-        ua, ub = UNIVERSE[a], UNIVERSE[b]
-        if ua["sector"] in _NO_PAIR_SECTORS:
+# All tickers are German-exchange (.DE/.F) EUR listings, so cross-country
+# same-sector pairs are still FX-safe — we trade the EUR listing either way.
+MAX_PER_GROUP = 40   # most-liquid names kept per group before forming C(n,2) pairs
+
+
+def candidate_pairs(mode: str = "country_sector",
+                    max_per_group: int = MAX_PER_GROUP) -> list[tuple[str, str]]:
+    """Candidate pairs grouped by sector (broad) or country+sector (tight).
+
+    mode="sector"          → same sector, any country.
+    mode="country_sector"  → same country AND sector.
+
+    Junk sectors are never paired. Within each group only the most-liquid
+    (lowest slippage_bps) `max_per_group` names are kept, so a large sector
+    doesn't explode the walk-forward — bounds compute without a global cap.
+    """
+    groups: dict[tuple, list[str]] = {}
+    for t in UNIVERSE:
+        m = UNIVERSE[t]
+        if m["sector"] in _NO_PAIR_SECTORS:
             continue
-        if ua["sector"] == ub["sector"] and ua["currency"] == ub["currency"]:
+        key = (m["sector"],) if mode == "sector" else (m.get("country", "—"), m["sector"])
+        groups.setdefault(key, []).append(t)
+
+    out = []
+    for key, members in groups.items():
+        members.sort(key=lambda t: UNIVERSE[t].get("slippage_bps", 99))
+        for a, b in combinations(sorted(members[:max_per_group]), 2):
             out.append((a, b))
     return out
 

@@ -34,8 +34,17 @@ ENTRY_Z        = 2.0
 STOP_Z         = 3.5
 FEE_EUR        = 1.0        # Trade Republic per-order fee
 COST_MULTS     = (0.0, 1.0, 2.0)
+PAIR_MODE      = "country_sector"   # "country_sector" (tight) or "sector" (broad)
 
 ROOT = Path(__file__).parent
+
+
+def _broker(t: str) -> str:
+    """Broker label for a yfinance ticker: 'WKN · Name' so the pair is findable
+    in the app. Falls back to the ticker when the universe lacks broker IDs."""
+    m = UNIVERSE.get(t, {})
+    wkn, name = m.get("local_id", ""), m.get("name", t)
+    return f"{wkn} · {name}" if wkn else name
 
 
 # ── Data assembly ─────────────────────────────────────────────────────────────
@@ -44,7 +53,7 @@ def gather(force: bool = False, refresh: bool | None = None) -> dict:
     # `force` is the live-server convention; `refresh` kept for the CLI flag.
     refresh = force if refresh is None else refresh
     prices = fetch_prices(refresh=refresh)
-    cands = candidate_pairs()
+    cands = candidate_pairs(mode=PAIR_MODE)
     slip = {t: UNIVERSE[t]["slippage_bps"] for t in UNIVERSE}
 
     bt = run_backtest(prices, cands, slip, capital=CAPITAL,
@@ -69,23 +78,26 @@ def gather(force: bool = False, refresh: bool | None = None) -> dict:
 def sec_intro() -> str:
     return f"""
 <div class="note">
-<b>Statistical arbitrage demo</b> — scans {len(UNIVERSE)} LS-Exchange-tradeable
-stocks for cointegrated same-sector, same-currency pairs (Engle-Granger two-step),
-then trades the spread on z-score signals in a walk-forward backtest with
-Trade Republic-style costs (€{FEE_EUR:.0f}/order + 5–15 bps slippage per leg).
-Paper simulation: shorting is simulated — Trade Republic offers no shorting.
-Not financial advice.
+<b>Statistical arbitrage demo</b> — scans {len(UNIVERSE)} broker-tradeable, sector-tagged
+stocks (from the Lang &amp; Schwarz / Trade Republic list) for cointegrated pairs
+({"same country + sector" if PAIR_MODE == "country_sector" else "same sector"},
+Engle-Granger two-step), then trades the spread on z-score signals in a walk-forward
+backtest with Trade Republic-style costs (€{FEE_EUR:.0f}/order + per-leg slippage from
+the live bid/ask spread). Paper simulation: shorting is simulated — Trade Republic
+offers no shorting. Not financial advice.
 </div>"""
 
 
 def sec_snapshot(d: dict) -> str:
     out = ["<h2>Current snapshot</h2>"]
+    grouping = "same country + sector" if PAIR_MODE == "country_sector" else "same sector"
     out.append(f"""<p class='dim'>Latest {FORMATION_DAYS}-trading-day formation window.
-{d['n_tested']} same-sector/same-currency candidates tested, {len(d['live'])}
+{d['n_tested']} {grouping} candidates tested, {len(d['live'])}
 cointegrated (p &lt; {P_MAX}) with a tradeable half-life. Multiple-testing caveat:
 at p &lt; {P_MAX}, roughly {round(P_MAX * d['n_tested'])} of {d['n_tested']} tests
 pass by pure chance. This snapshot is in-sample (μ/σ/β fit on this same window) —
-the backtest below is strictly out-of-sample.</p>""")
+the backtest below is strictly out-of-sample. Each leg shows its broker WKN · name
+so you can find and trade the pair in the app.</p>""")
     n_signal = sum(1 for p in d["live"] if abs(p["z_now"]) >= ENTRY_Z)
     cards = [
         _card("Universe", str(len(UNIVERSE))),
@@ -103,15 +115,19 @@ the backtest below is strictly out-of-sample.</p>""")
             sig = f"LONG {p['y']} / SHORT {p['x']}"
         elif p["z_now"] >= ENTRY_Z:
             sig = f"SHORT {p['y']} / LONG {p['x']}"
+        m = UNIVERSE.get(p["y"], {})
         rows.append(
             f"<tr><td class='mono'>{p['y']}/{p['x']}</td>"
-            f"<td>{UNIVERSE[p['y']]['sector']}</td>"
+            f"<td class='dim' style='font-size:0.8rem'>{_broker(p['y'])}<br>{_broker(p['x'])}</td>"
+            f"<td>{m.get('country','—')}</td>"
+            f"<td>{m.get('sector','—')}</td>"
             f"<td class='num mono'>{p['pvalue']:.3f}</td>"
             f"<td class='num mono'>{p['beta']:.2f}</td>"
             f"<td class='num mono'>{p['half_life']:.0f}d</td>"
             f"<td class='num mono {zcls}'>{p['z_now']:+.2f}</td>"
             f"<td class='mono'>{sig}</td></tr>")
-    out.append("<table><tr><th>Pair</th><th>Sector</th><th class='num'>p-value</th>"
+    out.append("<table><tr><th>Pair</th><th>Broker (WKN · name)</th><th>Country</th>"
+               "<th>Sector</th><th class='num'>p-value</th>"
                "<th class='num'>β</th><th class='num'>Half-life</th>"
                "<th class='num'>z now</th><th>Signal</th></tr>"
                + "".join(rows) + "</table>")
@@ -198,7 +214,9 @@ signals with t+1 execution. Capital is split equally across that window's pairs.
     for t in trades:
         ret_pct = t["net"] / t["capital"] * 100
         z_e = f"{t['z_entry']:+.2f}" if t["z_entry"] is not None else "—"
-        rows.append(f"<tr><td class='mono'>{t['pair']}</td>"
+        legs = t["pair"].split("/")
+        tip = " | ".join(_broker(s) for s in legs)     # WKN · name on hover
+        rows.append(f"<tr><td class='mono' title='{tip}'>{t['pair']}</td>"
                     f"<td>{'long' if t['side'] == 1 else 'short'} spread</td>"
                     f"<td class='mono'>{t['entry'].date()}</td>"
                     f"<td class='mono'>{t['exit'].date()}</td>"

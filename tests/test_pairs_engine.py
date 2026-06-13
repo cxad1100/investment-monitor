@@ -45,6 +45,34 @@ def test_candidate_pairs_curated_counts(monkeypatch):
     assert 30 <= len(pairs) <= 80             # ~52 with the curated universe
 
 
+def test_candidate_pairs_modes(monkeypatch):
+    fake = {
+        "AAA.DE": dict(sector="Banks", currency="EUR", slippage_bps=5, country="Germany"),
+        "BBB.DE": dict(sector="Banks", currency="EUR", slippage_bps=6, country="Germany"),
+        "CCC.MI": dict(sector="Banks", currency="EUR", slippage_bps=7, country="Italy"),
+        "DDD.DE": dict(sector="Autos", currency="EUR", slippage_bps=8, country="Germany"),
+    }
+    monkeypatch.setattr(pu, "UNIVERSE", fake)
+    sect = set(pu.candidate_pairs(mode="sector"))
+    cs = set(pu.candidate_pairs(mode="country_sector"))
+    # cross-country same-sector pair: in sector mode, not in country_sector mode
+    assert ("AAA.DE", "CCC.MI") in sect
+    assert ("AAA.DE", "CCC.MI") not in cs
+    # same-country same-sector pair: in both
+    assert ("AAA.DE", "BBB.DE") in sect and ("AAA.DE", "BBB.DE") in cs
+    # cross-sector never paired
+    for a, b in sect | cs:
+        assert fake[a]["sector"] == fake[b]["sector"]
+
+
+def test_candidate_pairs_per_group_cap(monkeypatch):
+    fake = {f"T{i}.DE": dict(sector="Banks", currency="EUR", slippage_bps=i + 1,
+                             country="Germany") for i in range(10)}
+    monkeypatch.setattr(pu, "UNIVERSE", fake)
+    pairs = pu.candidate_pairs(mode="sector", max_per_group=4)
+    assert len(pairs) == 6                    # top-4 by slippage → C(4,2)=6
+
+
 def make_cointegrated(n=750, seed=42, beta=0.8, alpha=0.5, phi=0.7, noise=0.02):
     """Price pair sharing a random-walk driver:
     log x = random walk; log y = alpha + beta*log x + AR(1) noise."""
