@@ -83,20 +83,24 @@ def run_momentum(prices: pd.DataFrame, slippage_bps: dict, *, k: int = 15,
                                  scores={t: float(scores[t]) for t in picks}))
 
     runs = {}
-    for m in cost_mults:
+    for mult in cost_mults:
         equity_val = capital
-        eq_points = [(prices.index[0], capital)]
+        eq_points = [(holdings_log[0]["date"], capital)] if holdings_log \
+            else [(prices.index[0], capital)]
         trades = []
         prev: set[str] = set()
         for h in holdings_log:
             d, nxt, picks = h["date"], h["next"], h["picks"]
             if not picks:
+                if prev:                                # liquidate to cash: charge exit
+                    equity_val -= sum(fee_eur + slippage_bps[t] / 1e4 * (equity_val / len(prev))
+                                      for t in prev) * mult
                 prev = set()
                 continue
             w = equity_val / len(picks)                 # equal notional per name
             traded = (set(picks) ^ prev)                # enters + exits
-            cost = sum(fee_eur + slippage_bps.get(t, liq_max) / 1e4 * w
-                       for t in traded) * m
+            cost = sum(fee_eur + slippage_bps[t] / 1e4 * w
+                       for t in traded) * mult
             equity_val -= cost
             seg = prices.loc[d:nxt, picks]
             rets = seg.pct_change().iloc[1:].fillna(0.0)
@@ -106,14 +110,14 @@ def run_momentum(prices: pd.DataFrame, slippage_bps: dict, *, k: int = 15,
                 eq_points.append((day, equity_val))
             for t in picks:
                 name_ret = float(seg[t].iloc[-1] / seg[t].iloc[0] - 1.0)
-                c = (fee_eur + slippage_bps.get(t, liq_max) / 1e4 * w) * m \
+                c = (fee_eur + slippage_bps[t] / 1e4 * w) * mult \
                     if t in traded else 0.0
                 trades.append(dict(pair=t, entry=d, exit=nxt, days=len(seg) - 1,
                                    gross=w * name_ret, costs=c,
                                    net=w * name_ret - c, capital=w))
             prev = set(picks)
         equity = pd.Series(dict(eq_points)).sort_index()
-        runs[m] = dict(equity=equity, trades=trades,
+        runs[mult] = dict(equity=equity, trades=trades,
                        stats=backtest_stats(equity, trades, capital))
     return {"runs": runs, "holdings_log": holdings_log,
             "start": str(dates[0].date()) if dates else None}

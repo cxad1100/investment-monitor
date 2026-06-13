@@ -97,6 +97,7 @@ def test_run_momentum_equity_starts_at_capital():
     eq = r["runs"][1.0]["equity"]
     assert abs(eq.iloc[0] - 10_000.0) < 1e-6
     assert "stats" in r["runs"][1.0] and "sharpe" in r["runs"][1.0]["stats"]
+    assert eq.index[0] == r["holdings_log"][0]["date"]   # anchored at first rebalance
 
 
 def test_run_momentum_no_history_returns_empty_schedule():
