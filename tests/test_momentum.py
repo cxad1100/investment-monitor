@@ -105,3 +105,27 @@ def test_run_momentum_no_history_returns_empty_schedule():
     px = pd.DataFrame({"A": np.linspace(100, 110, 100)}, index=idx)
     r = run_momentum(px, {"A": 10}, k=5, cost_mults=(1.0,))
     assert r["holdings_log"] == []
+
+
+from tools.momentum import benchmark_curves, equal_weight_curve
+
+
+def test_benchmark_curve_buy_hold_normalized():
+    idx = pd.bdate_range("2021-01-01", periods=100)
+    bench = pd.DataFrame({"MSCI World": np.linspace(100, 120, 100)}, index=idx)
+    window = idx[10:90]
+    curves = benchmark_curves(bench, window, capital=10_000.0)
+    c = curves["MSCI World"]
+    assert abs(c.iloc[0] - 10_000.0) < 1e-6           # starts at capital
+    assert c.iloc[-1] > c.iloc[0]                      # rising benchmark rises
+    assert list(c.index) == list(window)
+
+
+def test_equal_weight_curve_starts_at_capital():
+    idx = pd.bdate_range("2021-01-01", periods=120)
+    px = pd.DataFrame({"A": np.linspace(100, 130, 120),
+                       "B": np.linspace(100, 110, 120)}, index=idx)
+    window = idx[5:115]
+    c = equal_weight_curve(px, ["A", "B"], window, capital=10_000.0)
+    assert abs(c.iloc[0] - 10_000.0) < 1e-6
+    assert c.iloc[-1] > c.iloc[0]

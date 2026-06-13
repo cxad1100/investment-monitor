@@ -121,3 +121,26 @@ def run_momentum(prices: pd.DataFrame, slippage_bps: dict, *, k: int = 15,
                        stats=backtest_stats(equity, trades, capital))
     return {"runs": runs, "holdings_log": holdings_log,
             "start": str(dates[0].date()) if dates else None}
+
+
+def benchmark_curves(bench_prices: pd.DataFrame, window, capital: float) -> dict:
+    """Buy-hold equity per benchmark over `window`, each normalized to `capital`
+    at the window start. Missing benchmarks (all-NaN) are skipped."""
+    out = {}
+    for name in bench_prices.columns:
+        s = bench_prices[name].reindex(window).ffill().dropna()
+        if s.empty or float(s.iloc[0]) <= 0:
+            continue
+        out[name] = capital * s / float(s.iloc[0])
+    return out
+
+
+def equal_weight_curve(prices: pd.DataFrame, tickers: list[str], window,
+                       capital: float) -> pd.Series:
+    """Equity of an equal-weight buy-hold basket of `tickers` over `window`,
+    normalized to `capital` at the start — the 'hold everything equally'
+    honesty benchmark."""
+    sub = prices.reindex(window)[tickers].ffill().dropna(how="all")
+    norm = sub / sub.iloc[0]                          # each name -> 1.0 at start
+    port = norm.mean(axis=1)                          # equal weight
+    return capital * port
