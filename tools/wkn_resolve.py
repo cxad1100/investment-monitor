@@ -110,20 +110,35 @@ def _name_tokens(s: str) -> set[str]:
     return toks - _STOP
 
 
+_CCY = "DL|EO|SF|SK|DK|NK|HD|LS|YC|PC|USD|EUR|CHF|GBP|SEK|DKK|NOK|HKD|JPY|GBX"
+
+
 def _clean_name(name: str) -> str:
-    """Normalize a broker name for Yahoo search: drop a leading ticker prefix
-    ('MTLA / MOTOROLA…'), the ADR/denomination tail ('(ADR)/1', 'ADR/5', 'DL-,01',
-    'EO-,01', 'SF-,01', 'O.N.', 'INH'…), share-class tags ('CL.A', 'CLASS B',
-    trailing ' A'/' B') and 'NEW'/'REG' share notes. Dots are kept here (a separate
-    de-glued variant handles abbreviations like SEMICON.MANU.)."""
-    s = (name or "").upper()
-    s = re.sub(r"^[A-Z0-9]+\s+/\s+", "", s)                          # leading ticker prefix 'MTLA / '
-    s = re.sub(r"\(?\bSP\.?\s*ADR\b\)?|\(?\bADR\b\)?\s*/?\s*\d*", " ", s)  # (ADR)/1, ADR/5, SP.ADR
-    s = re.split(r"\s{2,}|\bDL[\s\-]|\bEO[\s\-]|\bSF[\s\-]|\bLS[\s\-]|\sO\.?N\.?\b|\bINH\b|\bVINK\b|\bVZO\b|\bNAM(?:EN)?\b", s)[0]
-    s = re.sub(r"\s+-?\s*,\s*\d+\s*$", " ", s)                     # bare nominal tail '-,01' / ',001'
-    s = re.sub(r"\b(?:CL|CLASS)\.?\s*[A-Z]\b", " ", s)              # share class CL.A / CLASS B
-    s = re.sub(r"\bNEW\b|\bREG\b|\bRSP\b", " ", s)                  # new / registered shares
-    s = re.sub(r"\s+[A-Z]\s*$", " ", s)                            # trailing standalone class letter
+    """Normalize a German-broker security name for a Yahoo search — strip the junk
+    brokers append so only the company name remains:
+      - leading ticker prefix ('MTLA / MOTOROLA SOLUTIONS')
+      - currency + par value ('DL-,001', 'EO -,25', 'SF 0,01', 'SK 0,50', 'DK 1000',
+        'HD-,10', 'LS-,075', 'DL0,01', 'O.N.', bare '-,001'/',00003')
+      - ADR/depository junk ('ADR', 'SP.ADR', 'UNSP.ADRS', 'SDR', 'NY SHS') + ratios
+        ('/1', '/120', '/80000')
+      - registered/bearer/share-class jargon ('REGISTERED SHARES', 'NAM.', 'INH.',
+        'NOM.', 'NA', 'ORD', 'ACTIONS NOUVELLES', 'FRIA', 'CL.A'/'INC.A'/trailing 'A')
+      - '+' (Yahoo trips on it) and runs of whitespace.
+    Dots are kept (a de-glued variant handles abbreviations like SEMICON.MANU.)."""
+    s = (name or "").upper().replace("+", " ")                     # Yahoo trips on '+'
+    s = re.sub(r"^[A-Z0-9]+\s+/\s+", " ", s)                       # leading ticker prefix
+    s = re.sub(r"\b(?:SPON?|UNSP|SP)\.?\s*AD[RS]S?\b|\bAD[RS]S?\b", " ", s)   # (SP./SPON./UNSP.)ADR/ADS
+    s = re.sub(r"\bSDR\b|\bNY\s+SH\w*|\bUTS\b", " ", s)            # SDR, NY shares, units
+    s = re.sub(r"/\s*\d+", " ", s)                                 # depository ratio /1 /120 /80000
+    s = s.replace("/", " ")                                        # leftover slash (ADR/, A/S)
+    s = re.sub(r"\b(?:CL|CLASS)\.?\s*[A-Z]\b", " ", s)            # share class CL.A / CLASS B
+    s = re.sub(r"\b(?:REGISTERED|REG|NOMINAT|NOM|NAMEN|NAM|INH|ORD|FRIA|RSP|NAVNE|AKTIER|"
+               r"NOUVELLES?|ACTIONS?|RED|VAR|VTG|VINK|VZO|NA|NEW|FR)\b\.?", " ", s)  # share-type jargon
+    s = re.sub(rf"\b(?:{_CCY})(?=[-.,\s]*\d)\s*[-\d.,\s]*", " ", s)   # currency + par value (incl DL0,01)
+    s = re.sub(r"\bO\.?\s*N\.?\b", " ", s)                        # O.N. (Ohne Nennwert)
+    s = re.sub(r"[-,]\s*\d[\d.,]*", " ", s)                       # bare nominal '-,001' / ',00003'
+    s = re.sub(r"\(\s*\)", " ", s)                               # empty parens left by stripped ADR
+    s = re.sub(r"\s+[A-Z]\s*$", " ", s)                          # trailing standalone class letter
     return re.sub(r"\s+", " ", s).strip(" .,-") or (name or "")
 
 
