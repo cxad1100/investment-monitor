@@ -99,9 +99,14 @@ _STOP = {"INC", "CORP", "CO", "LTD", "PLC", "THE", "GROUP", "GRP", "HLDG", "HLDG
 
 
 def _name_tokens(s: str) -> set[str]:
-    """Alpha tokens (>=3 chars) of a name, minus generic corporate words — used to
-    confirm a Yahoo result actually corresponds to the queried name."""
-    return {t for t in re.findall(r"[A-Z]{3,}", (s or "").upper()) if t not in _STOP}
+    """Significant tokens of a name for match-checking: alpha words >=3 chars, plus
+    short digit-bearing tickers (3M, 3I, 8X8, 5E) which would otherwise yield no
+    token and never match. The denomination tail is stripped first (via _clean_name)
+    so '…DL-,01' can't inject a spurious '01' token that fuzzy-matches junk."""
+    s = _clean_name(s).upper()
+    toks = set(re.findall(r"[A-Z]{3,}", s))
+    toks |= {t for t in re.findall(r"[A-Z0-9]{2,}", s) if any(c.isdigit() for c in t)}
+    return toks - _STOP
 
 
 def _clean_name(name: str) -> str:
