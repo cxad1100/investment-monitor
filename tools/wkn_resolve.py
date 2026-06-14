@@ -110,7 +110,7 @@ def _name_tokens(s: str) -> set[str]:
     return toks - _STOP
 
 
-_CCY = "DL|EO|SF|SK|DK|NK|HD|LS|YC|PC|USD|EUR|CHF|GBP|SEK|DKK|NOK|HKD|JPY|GBX"
+_CCY = "DL|EO|SF|SK|DK|NK|CD|ZY|HD|LS|YC|PC|USD|EUR|CHF|GBP|SEK|DKK|NOK|HKD|JPY|GBX|PLN|CAD|CNY"
 
 
 def _clean_name(name: str) -> str:
@@ -127,14 +127,16 @@ def _clean_name(name: str) -> str:
     Dots are kept (a de-glued variant handles abbreviations like SEMICON.MANU.)."""
     s = (name or "").upper().replace("+", " ")                     # Yahoo trips on '+'
     s = re.sub(r"^[A-Z0-9]+\s+/\s+", " ", s)                       # leading ticker prefix
+    s = re.sub(r"\([^)]*\b(?:VT|VTG|BL|SUB|P\.?\s*S)\b[^)]*\)", " ", s)  # voting/board-lot/pref parens
     s = re.sub(r"\b(?:SPON?|UNSP|SP)\.?\s*AD[RS]S?\b|\bAD[RS]S?\b", " ", s)   # (SP./SPON./UNSP.)ADR/ADS
     s = re.sub(r"\bSDR\b|\bNY\s+SH\w*|\bUTS\b", " ", s)            # SDR, NY shares, units
     s = re.sub(r"/\s*\d+", " ", s)                                 # depository ratio /1 /120 /80000
     s = s.replace("/", " ")                                        # leftover slash (ADR/, A/S)
     s = re.sub(r"\b(?:CL|CLASS)\.?\s*[A-Z]\b", " ", s)            # share class CL.A / CLASS B
     s = re.sub(r"\b(?:REGISTERED|REG|NOMINAT|NOM|NAMEN|NAM|INH|ORD|FRIA|RSP|NAVNE|AKTIER|"
-               r"NOUVELLES?|ACTIONS?|RED|VAR|VTG|VINK|VZO|NA|NEW|FR)\b\.?", " ", s)  # share-type jargon
+               r"NOUVELLES?|ACTIONS?|RED|VAR|VTG|VINK|VZO|NA|NEW|SHARES?|SHS|CCI|SUB|PS)\b\.?", " ", s)
     s = re.sub(rf"\b(?:{_CCY})(?=[-.,\s]*\d)\s*[-\d.,\s]*", " ", s)   # currency + par value (incl DL0,01)
+    s = re.sub(rf"\b(?:{_CCY})\s*[-.,]+\s*$", " ", s)            # dangling currency w/o number 'DL-,'
     s = re.sub(r"\bO\.?\s*N\.?\b", " ", s)                        # O.N. (Ohne Nennwert)
     s = re.sub(r"[-,]\s*\d[\d.,]*", " ", s)                       # bare nominal '-,001' / ',00003'
     s = re.sub(r"\(\s*\)", " ", s)                               # empty parens left by stripped ADR
@@ -149,7 +151,7 @@ _ABBR = {
     "FIN": "FINANCIAL", "PHARM": "PHARMACEUTICALS", "RES": "RESOURCES",
     "IND": "INDUSTRIES", "INDS": "INDUSTRIES", "SVCS": "SERVICES", "SVC": "SERVICES",
     "COMM": "COMMUNICATIONS", "MTLS": "MATERIALS", "MATLS": "MATERIALS",
-    "PPTYS": "PROPERTIES",
+    "PPTYS": "PROPERTIES", "BCO": "BANCO", "BK": "BANK", "BQUE": "BANQUE",
 }
 
 
