@@ -119,6 +119,7 @@ def _clean_name(name: str) -> str:
     s = re.sub(r"^[A-Z0-9]+\s+/\s+", "", s)                          # leading ticker prefix 'MTLA / '
     s = re.sub(r"\(?\bSP\.?\s*ADR\b\)?|\(?\bADR\b\)?\s*/?\s*\d*", " ", s)  # (ADR)/1, ADR/5, SP.ADR
     s = re.split(r"\s{2,}|\bDL[\s\-]|\bEO[\s\-]|\bSF[\s\-]|\bLS[\s\-]|\sO\.?N\.?\b|\bINH\b|\bVINK\b|\bVZO\b|\bNAM(?:EN)?\b", s)[0]
+    s = re.sub(r"\s+-?\s*,\s*\d+\s*$", " ", s)                     # bare nominal tail '-,01' / ',001'
     s = re.sub(r"\b(?:CL|CLASS)\.?\s*[A-Z]\b", " ", s)              # share class CL.A / CLASS B
     s = re.sub(r"\bNEW\b|\bREG\b|\bRSP\b", " ", s)                  # new / registered shares
     s = re.sub(r"\s+[A-Z]\s*$", " ", s)                            # trailing standalone class letter
