@@ -105,11 +105,20 @@ def _name_tokens(s: str) -> set[str]:
 
 
 def _clean_name(name: str) -> str:
-    """Strip the broker's denomination/nominal tail (e.g. 'AMAZON.COM INC.  DL-,01',
-    'SAP SE O.N.', '1+1 AG  INH O.N.') so the Yahoo name search matches the company."""
-    head = re.split(r"\s{2,}|\bDL[\s\-]|\bEO[\s\-]|\sO\.?N\.?\b|\bINH\b|\bVINK\b|\bVZO\b|\bNAM\b",
-                    (name or "").upper())[0]
-    return head.strip(" .,-") or (name or "")
+    """Drop the ADR/denomination tail of a broker name ('…ADR/5', 'DL-,01',
+    'EO-,01', 'O.N.', 'INH', …) for a Yahoo name search; dots are kept here."""
+    s = re.sub(r"\bSP\.?\s*ADR\b|\bADR\s*/?\s*\d*\b", " ", (name or "").upper())  # ADR / ADR/5 / SP.ADR
+    s = re.split(r"\s{2,}|\bDL[\s\-]|\bEO[\s\-]|\sO\.?N\.?\b|\bINH\b|\bVINK\b|\bVZO\b|\bNAM\b", s)[0]
+    return re.sub(r"\s+", " ", s).strip(" ,-") or (name or "")
+
+
+def _name_variants(name: str) -> list[str]:
+    """Search forms to try in order: cleaned name as-is (keeps brand dots like
+    'AMAZON.COM'), then with dots de-glued ('SEMICON.MANU.' -> 'SEMICON MANU').
+    Some names match only one form (Amazon needs the dot, TSMC needs it gone)."""
+    base = _clean_name(name)
+    nodots = re.sub(r"\s+", " ", base.replace(".", " ")).strip(" ,-")
+    return [base] if nodots == base else [base, nodots]
 
 
 def _best_quote(quotes: list[dict] | None) -> dict | None:
@@ -152,10 +161,15 @@ def resolve_ticker(wkn: str, name: str, country: str, *,
         failed = q is None
         quote = _best_quote(q)
     if quote is None or not _names_match(name, quote):  # ISIN missed/garbage → by name
-        time.sleep(throttle)
-        q = _yahoo_search(_clean_name(name))            # strip 'DL-,01'/'O.N.' so Yahoo matches
-        failed = failed or q is None
-        quote = _best_quote(q)
+        quote = None
+        for nm in _name_variants(name):                 # dotted form, then de-glued
+            time.sleep(throttle)
+            q = _yahoo_search(nm)
+            failed = failed or q is None
+            cand = _best_quote(q)
+            if cand and _names_match(name, cand):
+                quote = cand
+                break
     sym = quote["symbol"] if (quote and _names_match(name, quote)) else None
     time.sleep(throttle)
     if sym is None and failed:
