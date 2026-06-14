@@ -105,7 +105,8 @@ def _name_tokens(s: str) -> set[str]:
     so '…DL-,01' can't inject a spurious '01' token that fuzzy-matches junk."""
     s = _clean_name(s).upper()
     toks = set(re.findall(r"[A-Z]{3,}", s))
-    toks |= {t for t in re.findall(r"[A-Z0-9]{2,}", s) if any(c.isdigit() for c in t)}
+    toks |= {t for t in re.findall(r"[A-Z0-9]{2,}", s)
+             if any(c.isdigit() for c in t) and any(c.isalpha() for c in t)}  # 3M/8X8, not 01/625
     return toks - _STOP
 
 
