@@ -14,6 +14,7 @@ offline universe build hits Yahoo once per name. The pure helpers
 """
 
 import json
+import re
 import time
 import urllib.parse
 import urllib.request
@@ -91,7 +92,27 @@ def _yahoo_search(query: str, timeout: float = 15.0, retries: int = 3) -> list[d
     return None
 
 
-def _best_symbol(quotes: list[dict] | None) -> str | None:
+# Generic corporate/denomination words — ignored when matching a broker name to a
+# Yahoo result, so "ORACLE CORP. DL-,01" matches "Oracle Corp." on the token ORACLE.
+_STOP = {"INC", "CORP", "CO", "LTD", "PLC", "THE", "GROUP", "GRP", "HLDG", "HLDGS",
+         "HOLDING", "HOLDINGS", "ORD", "REG", "SHS", "CLASS", "COM", "NEW", "AKT"}
+
+
+def _name_tokens(s: str) -> set[str]:
+    """Alpha tokens (>=3 chars) of a name, minus generic corporate words — used to
+    confirm a Yahoo result actually corresponds to the queried name."""
+    return {t for t in re.findall(r"[A-Z]{3,}", (s or "").upper()) if t not in _STOP}
+
+
+def _clean_name(name: str) -> str:
+    """Strip the broker's denomination/nominal tail (e.g. 'AMAZON.COM INC.  DL-,01',
+    'SAP SE O.N.', '1+1 AG  INH O.N.') so the Yahoo name search matches the company."""
+    head = re.split(r"\s{2,}|\bDL[\s\-]|\bEO[\s\-]|\sO\.?N\.?\b|\bINH\b|\bVINK\b|\bVZO\b|\bNAM\b",
+                    (name or "").upper())[0]
+    return head.strip(" .,-") or (name or "")
+
+
+def _best_quote(quotes: list[dict] | None) -> dict | None:
     # German EUR exchanges only: the broker trades the German listing, and an
     # EUR-only universe keeps pairs FX-safe (no foreign USD/GBP/CHF listings).
     eq = [q for q in (quotes or [])
@@ -99,8 +120,15 @@ def _best_symbol(quotes: list[dict] | None) -> str | None:
           and q.get("exchange") in _EXCH_RANK]
     if not eq:
         return None
-    eq.sort(key=lambda q: _EXCH_RANK[q.get("exchange", "")])
-    return eq[0]["symbol"]
+    eq.sort(key=lambda q: _EXCH_RANK[q["exchange"]])
+    return eq[0]
+
+
+def _names_match(query: str, quote: dict) -> bool:
+    """True if the broker name and the quote's name share a real token — rejects
+    Yahoo fuzzy non-matches (the DFK0.F='01 Quantum' attractor for unmatched names)."""
+    cand = f"{quote.get('shortname', '')} {quote.get('longname', '')}"
+    return bool(_name_tokens(query) & _name_tokens(cand))
 
 
 def resolve_ticker(wkn: str, name: str, country: str, *,
@@ -109,24 +137,26 @@ def resolve_ticker(wkn: str, name: str, country: str, *,
     use the deterministic DE-ISIN (DE000+WKN is a *real* ISIN only for them);
     foreign / N-A names resolve by name search — for those the computed DE-ISIN
     is fake and Yahoo fuzzy-matches it to an unrelated stock (the DFK0.F bug).
-    `_best_symbol` keeps only German EUR exchanges, so even a foreign name
-    resolves to its EUR German listing (e.g. AMAZON → AMZ.F) — FX-safe.
-    Memoised by WKN; returns None if unresolved."""
+    Either way the result is accepted only if its name actually matches the broker
+    name (`_names_match`) and it is a German EUR listing (`_best_quote`) — this
+    rejects Yahoo's fuzzy non-matches (the DFK0.F='01 Quantum' attractor) and keeps
+    the universe FX-safe. Memoised by WKN; returns None if unresolved."""
     cache = _load_cache() if cache is None else cache
     if wkn in cache:                                   # "" cached = known-miss
         return cache[wkn] or None
 
     failed = False
-    sym = None
+    quote = None
     if str(country).strip().lower() in ("germany", "deutschland", "de"):
         q = _yahoo_search(isin_from_wkn(wkn))          # real DE-ISIN only for German issuers
         failed = q is None
-        sym = _best_symbol(q)
-    if sym is None:                                    # foreign / N/A / DE miss → by name
+        quote = _best_quote(q)
+    if quote is None or not _names_match(name, quote):  # ISIN missed/garbage → by name
         time.sleep(throttle)
-        q = _yahoo_search(name)
+        q = _yahoo_search(_clean_name(name))            # strip 'DL-,01'/'O.N.' so Yahoo matches
         failed = failed or q is None
-        sym = _best_symbol(q)
+        quote = _best_quote(q)
+    sym = quote["symbol"] if (quote and _names_match(name, quote)) else None
     time.sleep(throttle)
     if sym is None and failed:
         return None                                    # transient — leave uncached, retry next run
