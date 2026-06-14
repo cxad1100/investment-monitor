@@ -17,6 +17,14 @@ def test_eligible_drops_illiquid_and_short_history():
     assert elig == {"LIQ"}
 
 
+def test_eligible_drops_sub_min_price():
+    idx = pd.bdate_range("2020-01-01", periods=300)
+    px = pd.DataFrame({"OK": np.linspace(5, 6, 300),               # >= EUR1
+                       "PENNY": np.linspace(0.004, 0.03, 300)}, idx)  # sub-EUR1 penny
+    slip = {"OK": 10, "PENNY": 10}
+    assert eligible(px, idx[-1], slip, liq_max=30, min_obs=273, min_price=1.0) == {"OK"}
+
+
 def test_select_topk_ranks_and_respects_eligibility():
     scores = pd.Series({"A": 0.5, "B": 0.9, "C": 0.1, "D": 0.7})
     picks = select_topk(scores, {"A", "B", "C", "D"}, k=2)

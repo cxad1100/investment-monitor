@@ -41,15 +41,17 @@ def momentum_scores(prices: pd.DataFrame, asof, lookback: int = 252,
 
 
 def eligible(prices: pd.DataFrame, asof, slippage_bps: dict,
-             liq_max: int = 30, min_obs: int = 273) -> set[str]:
-    """Tradeable names at `asof`: tight half-spread, enough history, valid price."""
+             liq_max: int = 30, min_obs: int = 273, min_price: float = 1.0) -> set[str]:
+    """Tradeable names at `asof`: tight half-spread, enough history, and a last
+    price >= min_price. The price floor drops sub-EUR1 penny listings whose 12-1
+    momentum is dominated by tick/illiquidity noise rather than real return."""
     hist = prices.loc[:asof]
     out: set[str] = set()
     for t in prices.columns:
         if slippage_bps.get(t, 10**9) > liq_max:
             continue
         col = hist[t].dropna()
-        if len(col) >= min_obs and float(col.iloc[-1]) > 0:
+        if len(col) >= min_obs and float(col.iloc[-1]) >= min_price:
             out.add(t)
     return out
 
@@ -63,7 +65,8 @@ def select_topk(scores: pd.Series, eligible_set: set[str], k: int) -> list[str]:
 def run_momentum(prices: pd.DataFrame, slippage_bps: dict, *, k: int = 15,
                  lookback: int = 252, skip: int = 21, capital: float = 10_000.0,
                  cost_mults: tuple = (0.0, 1.0, 2.0), freq: str = "M",
-                 liq_max: int = 30, fee_eur: float = 1.0) -> dict:
+                 liq_max: int = 30, fee_eur: float = 1.0,
+                 min_price: float = 1.0) -> dict:
     """Walk-forward momentum backtest.
 
     Returns {"runs": {mult: {equity, trades, stats}}, "holdings_log": [...],
@@ -77,7 +80,7 @@ def run_momentum(prices: pd.DataFrame, slippage_bps: dict, *, k: int = 15,
     for i in range(len(dates) - 1):
         d = dates[i]
         scores = momentum_scores(prices, d, lookback, skip)
-        elig = eligible(prices, d, slippage_bps, liq_max, lookback + skip)
+        elig = eligible(prices, d, slippage_bps, liq_max, lookback + skip, min_price)
         picks = select_topk(scores, elig, k)
         holdings_log.append(dict(date=d, next=dates[i + 1], picks=picks,
                                  scores={t: float(scores[t]) for t in picks}))

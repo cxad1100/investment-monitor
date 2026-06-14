@@ -30,6 +30,7 @@ LOOKBACK     = 252
 SKIP         = 21
 REBAL        = "M"
 LIQ_MAX      = 30
+MIN_PRICE    = 1.0        # drop sub-€1 penny listings (12-1 momentum = tick noise there)
 CAPITAL      = 10_000.0   # paper account, EUR
 FEE_EUR      = 1.0        # Trade Republic per-order fee
 COST_MULTS   = (0.0, 1.0, 2.0)
@@ -57,7 +58,7 @@ def gather(force: bool = False, refresh: bool | None = None) -> dict:
 
     res = run_momentum(prices, slip, k=K, lookback=LOOKBACK, skip=SKIP,
                        capital=CAPITAL, cost_mults=COST_MULTS, freq=REBAL,
-                       liq_max=LIQ_MAX, fee_eur=FEE_EUR)
+                       liq_max=LIQ_MAX, fee_eur=FEE_EUR, min_price=MIN_PRICE)
 
     bench_tickers = [tk for _, (tk, _) in BENCHMARKS.items()]
     bench_raw = cached_price_history(bench_tickers, period="5y", force=refresh)
