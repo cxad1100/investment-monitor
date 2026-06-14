@@ -117,13 +117,37 @@ def _clean_name(name: str) -> str:
     return re.sub(r"\s+", " ", s).strip(" ,-") or (name or "")
 
 
+_ABBR = {
+    "INTL": "INTERNATIONAL", "INT": "INTERNATIONAL", "TECH": "TECHNOLOGY",
+    "TECHN": "TECHNOLOGY", "SYS": "SYSTEMS", "MGMT": "MANAGEMENT", "GRP": "GROUP",
+    "HLDG": "HOLDINGS", "HLDGS": "HOLDINGS", "HOLD": "HOLDINGS", "NATL": "NATIONAL",
+    "FIN": "FINANCIAL", "PHARM": "PHARMACEUTICALS", "RES": "RESOURCES",
+    "IND": "INDUSTRIES", "INDS": "INDUSTRIES", "SVCS": "SERVICES", "SVC": "SERVICES",
+    "COMM": "COMMUNICATIONS", "MTLS": "MATERIALS", "MATLS": "MATERIALS",
+    "PPTYS": "PROPERTIES",
+}
+
+
 def _name_variants(name: str) -> list[str]:
-    """Search forms to try in order: cleaned name as-is (keeps brand dots like
-    'AMAZON.COM'), then with dots de-glued ('SEMICON.MANU.' -> 'SEMICON MANU').
-    Some names match only one form (Amazon needs the dot, TSMC needs it gone)."""
+    """Yahoo search forms to try in order until one resolves + name-matches. Broker
+    names are abbreviated and surname-first, so generate: cleaned (keeps brand dots
+    like AMAZON.COM), de-glued (SEMICON.MANU. -> SEMICON MANU), parenthetical-reordered
+    (DISNEY (WALT) CO -> WALT DISNEY CO), and abbreviation-expanded (DIGI INTL ->
+    DIGI INTERNATIONAL). Each form is still gated by _names_match, so extra forms
+    can't admit a wrong company."""
     base = _clean_name(name)
-    nodots = re.sub(r"\s+", " ", base.replace(".", " ")).strip(" ,-")
-    return [base] if nodots == base else [base, nodots]
+    forms = [base, re.sub(r"\s+", " ", base.replace(".", " ")).strip(" ,-")]
+    m = re.match(r"^(.*?)\s*\(([^)]+)\)\s*(.*)$", base)         # SURNAME (FIRST) -> FIRST SURNAME
+    if m:
+        forms.append(re.sub(r"\s+", " ", f"{m.group(2)} {m.group(1)} {m.group(3)}").strip(" .,-"))
+    flat = re.sub(r"[.,()]", " ", base).upper()
+    exp = re.sub(r"\s+", " ", re.sub(r"[A-Z]+", lambda w: _ABBR.get(w.group(), w.group()), flat)).strip()
+    forms.append(exp)
+    out = []
+    for f in forms:
+        if f and f not in out:
+            out.append(f)
+    return out
 
 
 def _best_quote(quotes: list[dict] | None) -> dict | None:
