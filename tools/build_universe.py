@@ -1,13 +1,13 @@
 """Build the tradeable, sector-tagged pairs universe from the scraped broker list.
 
-Input: `data/ls_tc_all_stocks_clean.csv` — every stock on the broker
-(Lang & Schwarz / Trade Republic): Local_ID (WKN), Name, Country, Sector,
-live Bid/Ask, Perf_1Y. Only ~2.7k rows carry a Country + Sector; those are the
-tradeable, tagged set we keep.
+Input: `data/universe.csv` — every stock on the broker (Lang & Schwarz /
+Trade Republic): Local_ID (WKN), Name, Country, Sector, live Bid/Ask, Perf_1Y.
+This file is the complete registry; the tradeable universe is every asset that
+resolves to a German EUR listing with price history (sector-optional).
 
 Pipeline (offline, slow, network-bound — run once, cached):
-  1. Keep rows with Country + Sector; parse Bid/Ask → half-spread → slippage_bps,
-     drop untradeably-wide spreads.
+  1. Parse Bid/Ask → half-spread → slippage_bps; drop untradeably-wide spreads
+     and sub-€1 penny listings. Sector-optional (N/A sector kept as "Unknown").
   2. Resolve WKN → yfinance ticker (tools.wkn_resolve, cached to
      data/wkn_ticker_map.json): German via deterministic ISIN → Yahoo search,
      foreign by name. Skip unresolved.
@@ -37,10 +37,11 @@ from tools.wkn_resolve import resolve_ticker, spread_to_slippage, _load_cache, _
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
 ROOT = Path(__file__).resolve().parent.parent
-SRC = ROOT / "data" / "ls_tc_all_stocks_clean.csv"
+SRC = ROOT / "data" / "universe.csv"
 OUT = ROOT / "data" / "universe_meta.csv"
 
 MAX_SPREAD_PCT = 1.5       # drop names wider than this full bid/ask spread (untradeable)
+MIN_PRICE = 1.0            # drop sub-€1 penny listings (price/momentum = tick noise)
 CHUNK = 50                 # tickers per history-verify batch
 CHUNK_PAUSE = 1.0
 MAX_RETRY = 4
@@ -100,17 +101,20 @@ def main() -> None:
                     help="skip the history-verify stage (faster, keeps dead lines)")
     args = ap.parse_args()
 
-    df = pd.read_csv(SRC)
-    df = df[df["Country"].notna() & df["Sector"].notna()].copy()
+    df = pd.read_csv(SRC).copy()
+    # Sector-optional: keep every liquid, priced asset (momentum + future strats
+    # don't need a sector; pairs still pairs only the sector-tagged ones).
+    df["Country"] = df["Country"].fillna("—").replace({"N/A": "—"})
+    df["Sector"] = df["Sector"].fillna("Unknown").replace({"N/A": "Unknown"})
     df["bid"] = df["Bid"].map(_parse_eur)
     df["ask"] = df["Ask"].map(_parse_eur)
     mid = (df["bid"] + df["ask"]) / 2.0
     df["spread_pct"] = (df["ask"] - df["bid"]) / mid * 100.0
-    df = df[(mid > 0) & (df["spread_pct"] >= 0) & (df["spread_pct"] <= MAX_SPREAD_PCT)]
+    df = df[(mid >= MIN_PRICE) & (df["spread_pct"] >= 0) & (df["spread_pct"] <= MAX_SPREAD_PCT)]
     df = df.sort_values("spread_pct")            # tightest (most liquid) first
     if args.limit:
         df = df.head(args.limit)
-    print(f"tagged + liquid rows: {len(df)}")
+    print(f"liquid, priced rows (all sectors): {len(df)}")
 
     print("resolving WKN → ticker (cached)…")
     cache = _load_cache()

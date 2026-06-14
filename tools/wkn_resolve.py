@@ -1,6 +1,6 @@
 """Resolve a broker WKN (Local_ID) to a yfinance ticker, with an on-disk cache.
 
-The scraped broker list (`ls_tc_all_stocks_clean.csv`) identifies each stock by
+The scraped broker list (`universe.csv`) identifies each stock by
 its German WKN, not a yfinance ticker — but cointegration needs price history.
 
 - German securities: WKN → ISIN is deterministic (DE000 + WKN + ISIN check digit),
@@ -92,28 +92,33 @@ def _yahoo_search(query: str, timeout: float = 15.0, retries: int = 3) -> list[d
 
 
 def _best_symbol(quotes: list[dict] | None) -> str | None:
-    eq = [q for q in (quotes or []) if q.get("symbol") and q.get("quoteType") == "EQUITY"]
+    # German EUR exchanges only: the broker trades the German listing, and an
+    # EUR-only universe keeps pairs FX-safe (no foreign USD/GBP/CHF listings).
+    eq = [q for q in (quotes or [])
+          if q.get("symbol") and q.get("quoteType") == "EQUITY"
+          and q.get("exchange") in _EXCH_RANK]
     if not eq:
         return None
-    eq.sort(key=lambda q: _EXCH_RANK.get(q.get("exchange", ""), 9))
+    eq.sort(key=lambda q: _EXCH_RANK[q.get("exchange", "")])
     return eq[0]["symbol"]
 
 
-def resolve_ticker(wkn: str, name: str, country: str, *,
+def resolve_ticker(wkn: str, name: str, country: str = "", *,
                    cache: dict | None = None, throttle: float = 0.3) -> str | None:
-    """WKN/name → yfinance ticker. German names go WKN→ISIN→search; others search
-    by name. Memoised in `cache` (keyed by WKN); returns None if unresolved."""
+    """WKN → yfinance ticker (the German EUR listing). The WKN is a German
+    identifier, so try the deterministic DE-ISIN first — it resolves the German
+    listing even for foreign-domiciled names — then fall back to a name search.
+    `_best_symbol` keeps only German EUR exchanges, so the universe stays FX-safe.
+    Memoised by WKN; returns None if unresolved. `country` is unused (kept for
+    call-site compatibility)."""
     cache = _load_cache() if cache is None else cache
     if wkn in cache:                                   # "" cached = known-miss
         return cache[wkn] or None
 
-    failed = False                                     # any lookup hard-failed (429/timeout)
-    sym = None
-    if str(country).strip().lower() in ("germany", "deutschland", "de"):
-        q = _yahoo_search(isin_from_wkn(wkn))
-        failed = q is None
-        sym = _best_symbol(q)
-    if sym is None:                                    # foreign, or DE miss → by name
+    q = _yahoo_search(isin_from_wkn(wkn))              # German DE-ISIN first
+    failed = q is None
+    sym = _best_symbol(q)
+    if sym is None:                                    # ISIN missed → try by name
         time.sleep(throttle)
         q = _yahoo_search(name)
         failed = failed or q is None
@@ -121,5 +126,5 @@ def resolve_ticker(wkn: str, name: str, country: str, *,
     time.sleep(throttle)
     if sym is None and failed:
         return None                                    # transient — leave uncached, retry next run
-    cache[wkn] = sym or ""                              # definitive: a hit, or a true no-match
+    cache[wkn] = sym or ""                             # definitive: a hit, or a true no-match
     return sym
