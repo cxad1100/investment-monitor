@@ -110,11 +110,19 @@ def _name_tokens(s: str) -> set[str]:
 
 
 def _clean_name(name: str) -> str:
-    """Drop the ADR/denomination tail of a broker name ('…ADR/5', 'DL-,01',
-    'EO-,01', 'O.N.', 'INH', …) for a Yahoo name search; dots are kept here."""
-    s = re.sub(r"\bSP\.?\s*ADR\b|\bADR\s*/?\s*\d*\b", " ", (name or "").upper())  # ADR / ADR/5 / SP.ADR
-    s = re.split(r"\s{2,}|\bDL[\s\-]|\bEO[\s\-]|\sO\.?N\.?\b|\bINH\b|\bVINK\b|\bVZO\b|\bNAM\b", s)[0]
-    return re.sub(r"\s+", " ", s).strip(" ,-") or (name or "")
+    """Normalize a broker name for Yahoo search: drop a leading ticker prefix
+    ('MTLA / MOTOROLA…'), the ADR/denomination tail ('(ADR)/1', 'ADR/5', 'DL-,01',
+    'EO-,01', 'SF-,01', 'O.N.', 'INH'…), share-class tags ('CL.A', 'CLASS B',
+    trailing ' A'/' B') and 'NEW'/'REG' share notes. Dots are kept here (a separate
+    de-glued variant handles abbreviations like SEMICON.MANU.)."""
+    s = (name or "").upper()
+    s = re.sub(r"^[A-Z0-9]+\s+/\s+", "", s)                          # leading ticker prefix 'MTLA / '
+    s = re.sub(r"\(?\bSP\.?\s*ADR\b\)?|\(?\bADR\b\)?\s*/?\s*\d*", " ", s)  # (ADR)/1, ADR/5, SP.ADR
+    s = re.split(r"\s{2,}|\bDL[\s\-]|\bEO[\s\-]|\bSF[\s\-]|\bLS[\s\-]|\sO\.?N\.?\b|\bINH\b|\bVINK\b|\bVZO\b|\bNAM(?:EN)?\b", s)[0]
+    s = re.sub(r"\b(?:CL|CLASS)\.?\s*[A-Z]\b", " ", s)              # share class CL.A / CLASS B
+    s = re.sub(r"\bNEW\b|\bREG\b|\bRSP\b", " ", s)                  # new / registered shares
+    s = re.sub(r"\s+[A-Z]\s*$", " ", s)                            # trailing standalone class letter
+    return re.sub(r"\s+", " ", s).strip(" .,-") or (name or "")
 
 
 _ABBR = {
