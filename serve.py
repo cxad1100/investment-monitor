@@ -22,6 +22,7 @@ from urllib.parse import urlparse, parse_qs
 import build_report as B
 import build_pairs_report as P
 import build_momentum_report as M
+import build_scenarios_report as S
 
 PORT = 8000
 
@@ -30,6 +31,7 @@ PAGES = {
     "main":     dict(loader="/",         build="/report",          snap=B.ROOT / "local/report.html"),
     "pairs":    dict(loader="/pairs",    build="/pairs-report",    snap=P.ROOT / "local/pairs.html"),
     "momentum": dict(loader="/momentum", build="/momentum-report", snap=M.ROOT / "local/momentum.html"),
+    "scenarios": dict(loader="/scenarios", build="/scenarios-report", snap=S.ROOT / "local/scenarios.html"),
 }
 
 # cross-page nav links shown in the top bar, in display order
@@ -37,6 +39,7 @@ _NAV = [
     ("main",     "/",         "Portfolio"),
     ("pairs",    "/pairs",    "Pairs Lab"),
     ("momentum", "/momentum", "Momentum"),
+    ("scenarios", "/scenarios", "Scenarios"),
 ]
 
 
@@ -136,9 +139,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 d = P.gather(force=force)
                 html = P.build(d, public=False)
                 stale, as_of = None, None
-            else:
+            elif page == "momentum":
                 d = M.gather(force=force)
                 html = M.build(d, public=False)
+                stale, as_of = None, None
+            else:  # scenarios (local-only)
+                d = S.gather(force=force)
+                html = S.build(d, public=False)
                 stale, as_of = None, None
             cfg["snap"].write_text(html)            # keep last-good snapshot fresh
             html = _inject(html, page, as_of=as_of, stale=stale)
@@ -165,12 +172,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(_loader("/pairs-report" + ("?force=1" if force else "")))
         elif path == "/momentum":
             self._send(_loader("/momentum-report" + ("?force=1" if force else "")))
+        elif path == "/scenarios":
+            self._send(_loader("/scenarios-report" + ("?force=1" if force else "")))
         elif path == "/report":
             self._serve_report("main", force)
         elif path == "/pairs-report":
             self._serve_report("pairs", force)
         elif path == "/momentum-report":
             self._serve_report("momentum", force)
+        elif path == "/scenarios-report":
+            self._serve_report("scenarios", force)
         else:
             self.send_error(404)
 
