@@ -103,22 +103,26 @@ def _best_symbol(quotes: list[dict] | None) -> str | None:
     return eq[0]["symbol"]
 
 
-def resolve_ticker(wkn: str, name: str, country: str = "", *,
+def resolve_ticker(wkn: str, name: str, country: str, *,
                    cache: dict | None = None, throttle: float = 0.3) -> str | None:
-    """WKN → yfinance ticker (the German EUR listing). The WKN is a German
-    identifier, so try the deterministic DE-ISIN first — it resolves the German
-    listing even for foreign-domiciled names — then fall back to a name search.
-    `_best_symbol` keeps only German EUR exchanges, so the universe stays FX-safe.
-    Memoised by WKN; returns None if unresolved. `country` is unused (kept for
-    call-site compatibility)."""
+    """WKN → yfinance ticker (the German EUR listing). German-domiciled issuers
+    use the deterministic DE-ISIN (DE000+WKN is a *real* ISIN only for them);
+    foreign / N-A names resolve by name search — for those the computed DE-ISIN
+    is fake and Yahoo fuzzy-matches it to an unrelated stock (the DFK0.F bug).
+    `_best_symbol` keeps only German EUR exchanges, so even a foreign name
+    resolves to its EUR German listing (e.g. AMAZON → AMZ.F) — FX-safe.
+    Memoised by WKN; returns None if unresolved."""
     cache = _load_cache() if cache is None else cache
     if wkn in cache:                                   # "" cached = known-miss
         return cache[wkn] or None
 
-    q = _yahoo_search(isin_from_wkn(wkn))              # German DE-ISIN first
-    failed = q is None
-    sym = _best_symbol(q)
-    if sym is None:                                    # ISIN missed → try by name
+    failed = False
+    sym = None
+    if str(country).strip().lower() in ("germany", "deutschland", "de"):
+        q = _yahoo_search(isin_from_wkn(wkn))          # real DE-ISIN only for German issuers
+        failed = q is None
+        sym = _best_symbol(q)
+    if sym is None:                                    # foreign / N/A / DE miss → by name
         time.sleep(throttle)
         q = _yahoo_search(name)
         failed = failed or q is None
