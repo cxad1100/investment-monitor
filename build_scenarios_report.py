@@ -59,6 +59,24 @@ def compute_view(book: dict, current_prices: dict, corpus: list | None = None) -
     }
 
 
+def view_from_book(book: dict, current_prices: dict | None = None,
+                   corpus: list | None = None) -> dict:
+    """Page data dict from a book. Pair-books (barbell couples) compute a view per
+    pair; legacy single books delegate to compute_view."""
+    current_prices = current_prices or {}
+    if "pairs" in book:
+        return {"book": book, "corpus": corpus or [],
+                "pairs": [(p, compute_view(p, current_prices)) for p in book["pairs"]]}
+    return compute_view(book, current_prices, corpus)
+
+
+def _pairs_tickers(book: dict) -> set:
+    out: set = set()
+    for p in book.get("pairs", []):
+        out |= _price_tickers(p)
+    return out
+
+
 def _price_tickers(book: dict) -> set:
     """Tickers needed for target-price outcomes (target_pct needs no price)."""
     out = set()
@@ -108,8 +126,8 @@ def gather(force: bool = False) -> dict:
         return {"book": None, "corpus": corpus,
                 "as_of": datetime.now().strftime("%Y-%m-%d %H:%M")}
     book = json.loads(BOOK_PATH.read_text())
-    prices = _last_closes(_price_tickers(book), force=force)
-    d = compute_view(book, prices, corpus)
+    tickers = _pairs_tickers(book) if "pairs" in book else _price_tickers(book)
+    d = view_from_book(book, _last_closes(tickers, force=force), corpus)
     d["as_of"] = datetime.now().strftime("%Y-%m-%d %H:%M")
     return d
 
@@ -139,6 +157,13 @@ probabilities and weights to quantify.
 <pre>.venv/bin/python -m tools.video_ingest --limit 10   # fills local/scenarios/corpus.jsonl</pre>
 The corpus is the raw feed; the book is the active view this page renders.
 </div>"""
+
+
+def _pairs_intro() -> str:
+    return ("<div class='note'><b>Barbell scenario couples.</b> Each block is two "
+            "opposing outcomes the channel implies (they can't both happen), each with one "
+            "asset that wins under it. The grid shows what a 50/50 hold of the two winners "
+            "returns under each scenario — the hedge and its risk.</div>")
 
 
 def sec_generated(d: dict) -> str:
@@ -287,6 +312,39 @@ def sec_corpus(d: dict) -> str:
             "<th>Status</th></tr>" + "".join(rows) + "</table></details>")
 
 
+def sec_pair(pair: dict, view: dict) -> str:
+    """One barbell couple: two opposing scenarios (label + ≤50-word meaning + prob +
+    its winning asset), then the expected-return matrix and the per-scenario grid."""
+    scns = pair["scenarios"]
+    out = [f"<h2>{pair.get('title', 'Scenario couple')}</h2>"]
+    for s in scns:
+        sid = s["id"]
+        w = next((a for a in pair["assets"] if a.get("winner") == sid), None)
+        wtxt = ""
+        if w:
+            r = view["asset_ret"].get(w["name"], {}).get(sid)
+            wtxt = (f" · winner <b>{w['name']}</b> "
+                    f"<span class='dim mono' style='font-size:0.8rem'>{w['ticker']}</span> "
+                    f"{_pct((r or 0) * 100)}")
+        out.append(f"<div class='note'><b>[{sid}] {s.get('label', '')}</b> "
+                   f"<span class='dim'>p={_pct(s['prob'] * 100, signed=False)}</span>{wtxt}"
+                   f"<br><span class='dim'>{s.get('meaning', '')}</span></div>")
+
+    head_cells = "".join(f"<th class='num'>{s['id']}</th>" for s in scns)
+    rows = []
+    for name, exp in view["asset_exp"].items():
+        cells = "".join(f"<td class='num'>{_pct(view['asset_ret'][name][s['id']] * 100)}</td>"
+                        for s in scns)
+        rows.append(f"<tr><td>{name}</td>{cells}<td class='num'><b>{_pct(exp * 100)}</b></td></tr>")
+    grid_cells = "".join(f"<td class='num'><b>{_pct(view['grid'].get(s['id'], 0.0) * 100)}</b></td>"
+                         for s in scns)
+    out.append("<table><tr><th>Asset (50/50)</th>" + head_cells
+               + "<th class='num'>Expected</th></tr>" + "".join(rows)
+               + f"<tr><td><b>portfolio if scenario →</b></td>{grid_cells}"
+               + f"<td class='num'><b>{_pct(view['portfolio_exp'] * 100)}</b></td></tr></table>")
+    return "".join(out)
+
+
 def sec_caveat() -> str:
     return """
 <div class="note warn">
@@ -327,8 +385,14 @@ def build(d: dict, public: bool = False) -> str:
             f"<p class='dim'>generated {now} · local-only · "
             f"<a href='report.html'>← portfolio monitor</a></p>",
             sec_intro()]
-    if d.get("book") is None:
+    book = d.get("book")
+    if book is None:
         body = "".join(head + [_no_book(), sec_corpus(d), sec_method()])
+        return page(title, body)
+    if "pairs" in book:
+        body = "".join(head + [sec_generated(d), _pairs_intro()]
+                       + [sec_pair(p, v) for p, v in d.get("pairs", [])]
+                       + [sec_corpus(d), sec_caveat(), sec_method()])
         return page(title, body)
     body = "".join(head + [
         sec_generated(d),

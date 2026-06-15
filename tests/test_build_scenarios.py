@@ -51,6 +51,32 @@ def test_build_handles_missing_book():
     assert "No book" in html or "no book" in html
 
 
+def _pairs_book():
+    return {"_generated": "est", "as_of": "2026-06-15", "pairs": [
+        {"id": "1", "title": "Monetary regime", "scenarios": [
+            {"id": "a", "label": "Debasement", "meaning": "dollar down hard assets up",
+             "prob": 0.6, "prob_source": "llm_estimated"},
+            {"id": "b", "label": "Disinflation", "meaning": "inflation cools bonds win",
+             "prob": 0.4, "prob_source": "llm_estimated"}],
+         "assets": [
+            {"name": "Gold", "ticker": "GC=F", "weight": 0.5, "winner": "a",
+             "outcomes": {"a": {"target_pct": 0.8}, "b": {"target_pct": -0.15}}},
+            {"name": "Long Bonds", "ticker": "TLT", "weight": 0.5, "winner": "b",
+             "outcomes": {"a": {"target_pct": -0.15}, "b": {"target_pct": 0.25}}}]}]}
+
+
+def test_build_renders_barbell_pairs():
+    d = S.view_from_book(_pairs_book())
+    d["as_of"] = "t"
+    html = S.build(d, public=False)
+    assert "Monetary regime" in html
+    assert "Debasement" in html and "Disinflation" in html
+    assert "dollar down hard assets up" in html          # 50-word meaning rendered
+    assert "Gold" in html and "Long Bonds" in html        # one winner per scenario
+    assert "+32.5%" in html                               # grid scenario a = .5*.8+.5*(-.15)
+    assert "Numbers are LLM estimates" in html
+
+
 def test_compute_view_flags_skipped_unpriced_asset():
     # asset 2 pct-based (no price needed); asset 1 price-based with no price -> skipped
     book = _book()
