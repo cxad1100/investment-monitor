@@ -134,23 +134,23 @@ def _clean_name(name: str) -> str:
     s = re.sub(r"-\s*RIGHTS\s+TO\s+RSU-?|\bUTS\b", " ", s)             # rights-to-RSU, units
     s = re.sub(r"/\s*\d+", " ", s)                                 # depository ratio /1 /120 /80000
     s = s.replace("/", " ")                                        # leftover slash
-    s = re.sub(r"\b(?:CL|CLASS)\.?\s*[A-Z]\b", " ", s)            # share class CL.A / CLASS B
+    s = re.sub(r"\b(?:CL|CLASS|SER|PRF\.?\s*SE)\.?\s*[A-Z]\b", " ", s)   # share class CL.A / SER.B / PRF.SE.A
     s = re.sub(r"\b(?:REGISTERED|REG|NOMINAT|NOM|NAMEN|NAM|INH|ORD|FRIA|RSP|NAVNE|AKTIER|"
-               r"NOUVELLES?|ACTIONS?|RED|VAR|VTG|VINK|VZO|NA|NEW|SHARES?|SHS|CCI|SUBD?|PS|"
+               r"NOUVELLES?|ACTIONS?|RED|VAR|VTG|VINK|VZO|NA|NEW|WI|SHARES?|SHS|CCI|SUBD?|PS|"
                r"POST|SPLIT|PROM|STAPLED|DEL|SBI)\b\.?", " ", s)  # registered/bearer/class/action jargon
     s = re.sub(rf"\b(?:{_CCY})(?=[-.,\s]*\d)\s*[-\d.,\s]*", " ", s)   # currency + par value (incl DL0,01)
     s = re.sub(rf"\b(?:{_CCY})\s*[-.,]+\s*$", " ", s)            # dangling currency w/o number 'DL-,'
     s = re.sub(r"\bO\.?\s*N\.?\b", " ", s)                        # O.N. (Ohne Nennwert)
     s = re.sub(r"[-,]\s*\d[\d.,]*", " ", s)                       # bare nominal '-,001' / ',00003'
-    s = re.sub(r"\(\s*\)", " ", s)                               # empty parens left by stripped ADR
-    s = re.sub(r"\s+[A-Z]\s*$", " ", s)                          # trailing standalone class letter
+    s = re.sub(r"[^A-Z0-9\s&.]", " ", s)                         # allowlist: letters/digits/space/&/.
+    s = re.sub(r"\s+[A-Z]\s*$", " ", s)                          # trailing isolated letter (VOLVO A -> VOLVO)
     return re.sub(r"\s+", " ", s).strip(" .,-") or (name or "")
 
 
 _ABBR = {
     "INTL": "INTERNATIONAL", "INT": "INTERNATIONAL", "TECH": "TECHNOLOGY",
     "TECHN": "TECHNOLOGY", "SYS": "SYSTEMS", "MGMT": "MANAGEMENT", "GRP": "GROUP",
-    "HLDG": "HOLDINGS", "HLDGS": "HOLDINGS", "HOLD": "HOLDINGS", "NATL": "NATIONAL",
+    "HLDG": "HOLDINGS", "HLDGS": "HOLDINGS", "HLGS": "HOLDINGS", "HOLD": "HOLDINGS", "NATL": "NATIONAL",
     "FIN": "FINANCIAL", "PHARM": "PHARMACEUTICALS", "RES": "RESOURCES",
     "IND": "INDUSTRIES", "INDS": "INDUSTRIES", "SVCS": "SERVICES", "SVC": "SERVICES",
     "COMM": "COMMUNICATIONS", "MTLS": "MATERIALS", "MATLS": "MATERIALS",
@@ -170,10 +170,12 @@ def _name_variants(name: str) -> list[str]:
     can't admit a wrong company."""
     base = _clean_name(name)
     forms = [base, re.sub(r"\s+", " ", base.replace(".", " ")).strip(" ,-")]
-    m = re.match(r"^(.*?)\s*\(([^)]+)\)\s*(.*)$", base)         # SURNAME (FIRST) -> FIRST SURNAME
-    if m:
-        forms.append(re.sub(r"\s+", " ", f"{m.group(2)} {m.group(1)} {m.group(3)}").strip(" .,-"))
-    flat = re.sub(r"[.,()]", " ", base).upper()
+    m = re.match(r"^(.*?)\s*\(([^)]+)\)\s*(.*)$", (name or "").upper())   # SURNAME (FIRST) from ORIGINAL
+    if m and not re.search(r"\b(?:VT|VTG|BL|SUB|SPLIT|PROM|STAPLED|DEL|RSU|P\.?\s*S)\b", m.group(2)):
+        reordered = _clean_name(f"{m.group(2)} {m.group(1)} {m.group(3)}")  # WALT DISNEY CO
+        if reordered:
+            forms.append(reordered)
+    flat = re.sub(r"[.()]", " ", base)
     exp = re.sub(r"\s+", " ", re.sub(r"[A-Z]+", lambda w: _ABBR.get(w.group(), w.group()), flat)).strip()
     forms.append(exp)
     out = []
