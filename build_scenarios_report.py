@@ -141,6 +141,15 @@ The corpus is the raw feed; the book is the active view this page renders.
 </div>"""
 
 
+def sec_generated(d: dict) -> str:
+    note = (d.get("book") or {}).get("_generated")
+    if not note:
+        return ""
+    return ("<div class='note warn'><b>⚠ Numbers are LLM estimates.</b> "
+            f"{note}. Read the expected returns / probabilities as a structured guess "
+            "derived from the channel's qualitative stance — not as data, and not as advice.</div>")
+
+
 def sec_book_status(d: dict) -> str:
     if not d["problems"]:
         return ""
@@ -168,7 +177,10 @@ def sec_assets(d: dict) -> str:
         cur_txt = f"{cur:,.2f}" if cur is not None else "n/a (pct-based)"
         src = a.get("source", {})
         src_txt = ""
-        if src:
+        if src.get("mentions") is not None:           # aggregated source
+            src_txt = (f" · <span class='dim'>{src['mentions']} videos · "
+                       f"channel lean {src.get('lean','?')}</span>")
+        elif src.get("video_id"):                     # single-video source
             src_txt = (f" · <span class='dim'>from {src.get('video_id','?')} "
                        f"({src.get('upload_date','?')})</span>")
         rows = []
@@ -319,6 +331,7 @@ def build(d: dict, public: bool = False) -> str:
         body = "".join(head + [_no_book(), sec_corpus(d), sec_method()])
         return page(title, body)
     body = "".join(head + [
+        sec_generated(d),
         sec_book_status(d),
         sec_assets(d),
         sec_probabilities(d),
