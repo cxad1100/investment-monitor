@@ -188,7 +188,8 @@ signals with t+1 execution. Capital is split equally across that window's pairs.
                                              ticksuffix="%"),
                       hovermode="x unified", margin=dict(t=58),
                       legend=dict(orientation="h", yanchor="bottom", y=1.02,
-                                  xanchor="left", x=0, font=dict(size=11)))
+                                  xanchor="left", x=0, font=dict(size=11),
+                                  entrywidth=150, entrywidthmode="pixels"))
     out.append(f"<div class='chart'>{fig_html(fig)}</div>")
 
     cards = [

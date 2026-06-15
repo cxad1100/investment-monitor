@@ -149,10 +149,11 @@ def sec_curve(d: dict) -> str:
                                  name=name, line=dict(width=1.4)))
 
     fig.add_hline(y=100, line_dash="dash", line_color=theme.FG_DIM, line_width=1)
-    fig.update_layout(height=460, yaxis_title="Index (start = 100)",
-                      hovermode="x unified", margin=dict(t=58),
+    fig.update_layout(height=500, yaxis_title="Index (start = 100)",
+                      hovermode="x unified", margin=dict(t=96),   # room for wrapped legend rows
                       legend=dict(orientation="h", yanchor="bottom", y=1.02,
-                                  xanchor="left", x=0, font=dict(size=11)))
+                                  xanchor="left", x=0, font=dict(size=11),
+                                  entrywidth=150, entrywidthmode="pixels"))
     out.append(f"<div class='chart'>{fig_html(fig)}</div>")
     return "".join(out)
 

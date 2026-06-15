@@ -43,8 +43,11 @@ _TEMPLATE = go.layout.Template(
         colorway=PALETTE,
         xaxis=dict(gridcolor=GRID, zerolinecolor=GRID, linecolor=GRID),
         yaxis=dict(gridcolor=GRID, zerolinecolor=GRID, linecolor=GRID),
+        # entrywidth gives each legend item a fixed-width slot so a horizontal
+        # legend with many series spaces out and WRAPS to multiple rows instead of
+        # packing the labels on top of each other (the trimmed/overlapping legend).
         legend=dict(bgcolor="rgba(30,30,30,0.85)", bordercolor=GRID, borderwidth=1,
-                    font=dict(size=11)),
+                    font=dict(size=11), entrywidth=150, entrywidthmode="pixels"),
         hoverlabel=dict(bgcolor="#2d2d30", bordercolor=GRID,
                         font=dict(family=MONO, color=FG, size=12)),
         margin=dict(t=20, b=40, l=50, r=20),
