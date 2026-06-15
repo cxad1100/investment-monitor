@@ -426,7 +426,8 @@ def sec_frontier(d: dict) -> str:
                       yaxis_title="Expected return — Black-Litterman implied (annual %)",
                       margin=dict(t=58),
                       legend=dict(orientation="h", yanchor="bottom", y=1.02,
-                                  xanchor="left", x=0, font=dict(size=11)))
+                                  xanchor="left", x=0, font=dict(size=11),
+                                  entrywidth=150, entrywidthmode="pixels"))
     return ("<h2>Efficient frontier</h2>"
             "<p class='dim'>Each grey dot is a random mix of your assets. The white line is the "
             "frontier — best return at every risk level. The vertical axis uses Black-Litterman "
@@ -457,7 +458,8 @@ def sec_roi(d: dict) -> str:
     fig.update_layout(height=485, yaxis=dict(title="Cumulative ROI (%)", ticksuffix="%"),
                       hovermode="x unified", margin=dict(t=58),
                       legend=dict(orientation="h", yanchor="bottom", y=1.02,
-                                  xanchor="left", x=0, font=dict(size=11)))
+                                  xanchor="left", x=0, font=dict(size=11),
+                                  entrywidth=150, entrywidthmode="pixels"))
     ranked = sorted([("Portfolio (you)", float(roi.iloc[-1]))] +
                     [(n, float(s.iloc[-1])) for n, s in bms.items() if not s.empty],
                     key=lambda x: -x[1])
@@ -507,7 +509,8 @@ def sec_backtest(d: dict) -> str:
     fig.update_layout(height=425, yaxis=dict(title="Cumulative ROI (%)", ticksuffix="%"),
                       hovermode="x unified", margin=dict(t=58),
                       legend=dict(orientation="h", yanchor="bottom", y=1.02,
-                                  xanchor="left", x=0, font=dict(size=11)))
+                                  xanchor="left", x=0, font=dict(size=11),
+                                  entrywidth=150, entrywidthmode="pixels"))
 
     sp = roi.get("S&P 500")
     rows = []
