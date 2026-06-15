@@ -49,11 +49,17 @@ BACKOFF = 20
 
 
 def _parse_eur(s) -> float:
-    """Parse a broker price like '40.4000 €' (or German '1.234,56 €') to float."""
+    """Parse a broker price to float, detecting the decimal convention. The broker
+    is English-formatted ('1,613.2000 €' = 1613.7, comma=thousands, period=decimal),
+    but handle German ('1.234,56 €') too: whichever of ',' / '.' appears LAST is the
+    decimal separator."""
     t = str(s).replace("€", "").replace("\xa0", "").strip()
-    if "," in t and "." in t:          # German thousands+decimal: 1.234,56
-        t = t.replace(".", "").replace(",", ".")
-    elif "," in t:                     # comma decimal: 24,30
+    if "," in t and "." in t:
+        if t.rfind(",") < t.rfind("."):     # 1,613.20 -> English, comma=thousands
+            t = t.replace(",", "")
+        else:                               # 1.234,56 -> German, period=thousands
+            t = t.replace(".", "").replace(",", ".")
+    elif "," in t:                          # single comma: decimal (24,30)
         t = t.replace(",", ".")
     try:
         return float(t)
