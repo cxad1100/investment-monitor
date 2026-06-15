@@ -1,8 +1,13 @@
 """Shared HTML building blocks for the static reports."""
 
 import plotly.graph_objects as go
+import plotly.offline
 
 from tools import theme
+
+# Match the CDN plotly.js to the installed python-plotly: a v2 CDN rendering v3
+# figure JSON breaks the legend (entrywidth ignored, labels overlap/trim).
+_PLOTLY_JS = plotly.offline.get_plotlyjs_version()
 
 
 def fig_html(fig: go.Figure) -> str:
@@ -27,7 +32,7 @@ def page(title: str, body: str) -> str:
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title}</title>
-<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<script src="https://cdn.plot.ly/plotly-{_PLOTLY_JS}.min.js"></script>
 <style>{theme.REPORT_CSS}</style>
 </head><body><main>{body}</main>
 <script>
