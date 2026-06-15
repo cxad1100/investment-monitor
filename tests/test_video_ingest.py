@@ -5,7 +5,7 @@ injected, so dedup / failure-isolation / retry are tested deterministically.
 """
 import json
 
-from tools.video_ingest import ingest
+from tools.video_ingest import ingest, clean_summary
 
 
 def _read_ids(path):
@@ -100,3 +100,33 @@ def test_ingest_retry_failed_flag(tmp_path):
 
     retried = ingest("chan", corpus, retry_failed=True, **common)
     assert retried["processed"] == ["BAD"]     # retry_failed re-attempts it
+
+
+def test_ingest_writes_summaries_dir(tmp_path):
+    corpus = tmp_path / "corpus.jsonl"
+    sdir = tmp_path / "summaries"
+    videos = [{"video_id": "V1", "url": "u", "upload_date": "20260101", "title": "Hello World"}]
+    res = ingest("chan", corpus,
+                 list_videos=lambda url, limit, since: videos,
+                 run_vidsum=lambda v: "the summary body",
+                 extract=_ok_extract, now_iso="t", summaries_dir=sdir)
+    assert res["processed"] == ["V1"]
+    files = list(sdir.glob("*.md"))
+    assert len(files) == 1
+    assert files[0].name == "20260101_V1.md"   # sorts by upload date
+    text = files[0].read_text()
+    assert "the summary body" in text
+    assert "Hello World" in text                # header carries the title
+
+
+def test_clean_summary_strips_harmony_preamble():
+    raw = "<|channel>thought\nlet me think about this\n<channel|>\n### Summary\nGold up, dollar down."
+    assert clean_summary(raw) == "### Summary\nGold up, dollar down."
+
+
+def test_clean_summary_removes_stray_tokens():
+    assert clean_summary("<|start|>Real content<|end|>") == "Real content"
+
+
+def test_clean_summary_leaves_normal_text():
+    assert clean_summary("Just a normal market summary.") == "Just a normal market summary."

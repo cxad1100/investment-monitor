@@ -13,6 +13,7 @@ import argparse
 import glob
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -20,7 +21,7 @@ from datetime import datetime
 from pathlib import Path
 
 # ── Config (fill CHANNEL_URL before first run) ────────────────────────────────
-CHANNEL_URL = ""  # e.g. "https://www.youtube.com/@SomeMarketChannel/videos"
+CHANNEL_URL = "https://www.youtube.com/@AndreiJikh/videos"  # e.g. "https://www.youtube.com/@AndreiJikh/videos"
 VIDSUM_PY = "/Users/cxmc/code/vidsum/.venv/bin/python"
 EXTRACT_MODEL = "gemma4-abliterated:Q4_K_M"
 EXTRACT_TEMPERATURE = 0.1
@@ -58,19 +59,34 @@ def append_record(corpus_path: Path, rec: dict) -> None:
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
 
+def write_summary(summaries_dir, base: dict, summary: str) -> str:
+    """Dump one raw vidsum summary as markdown into a folder, named to sort by
+    upload date. Returns the path written."""
+    d = Path(summaries_dir)
+    d.mkdir(parents=True, exist_ok=True)
+    path = d / f"{base.get('upload_date') or 'NA'}_{base['video_id']}.md"
+    header = (f"# {base.get('title') or base['video_id']}\n\n"
+              f"- video: {base.get('url')}\n"
+              f"- uploaded: {base.get('upload_date')}\n\n---\n\n")
+    path.write_text(header + (summary or ""), encoding="utf-8")
+    return str(path)
+
+
 # ── Pure orchestration (I/O steps injected → fully testable) ──────────────────
 
 def ingest(channel_url: str, corpus_path, *, list_videos, run_vidsum, extract,
            limit: int | None = None, since: str | None = None,
-           retry_failed: bool = False, now_iso: str | None = None) -> dict:
+           retry_failed: bool = False, now_iso: str | None = None,
+           summaries_dir=None) -> dict:
     """List channel videos, skip ones already in the corpus, and for each new
     one run vidsum + extraction, appending a record. A single video's failure is
-    recorded and the batch continues."""
+    recorded and the batch continues. If summaries_dir is set, each raw summary is
+    also dumped there as markdown."""
     now_iso = now_iso or datetime.now().isoformat(timespec="seconds")
     done = processed_ids(corpus_path, retry_failed)
     videos = list_videos(channel_url, limit=limit, since=since)
 
-    results = {"processed": [], "failed": [], "skipped": []}
+    results = {"processed": [], "failed": [], "skipped": [], "summaries": []}
     for v in videos:
         vid = v["video_id"]
         if vid in done:
@@ -80,6 +96,8 @@ def ingest(channel_url: str, corpus_path, *, list_videos, run_vidsum, extract,
                 "upload_date": v.get("upload_date"), "ingested_at": now_iso}
         try:
             summary = run_vidsum(v)
+            if summaries_dir:
+                results["summaries"].append(write_summary(summaries_dir, base, summary))
             ext = extract(summary, v.get("upload_date"))
             status = "extract_failed" if ext.get("extraction_failed") else "ok"
             append_record(corpus_path, {**base, "status": status, "summary": summary,
@@ -100,11 +118,14 @@ def _yt_dlp_bin() -> str:
 
 
 def list_channel_videos(channel_url: str, *, limit: int | None = None,
-                        since: str | None = None) -> list[dict]:
+                        since: str | None = None, dateafter: str | None = None) -> list[dict]:
     """Recent uploads via yt-dlp (metadata only, no download). --skip-download
-    keeps upload_date populated (unlike --flat-playlist), bounded by --limit."""
+    keeps upload_date populated (unlike --flat-playlist). --dateafter lets yt-dlp
+    skip older uploads server-side; --playlist-end is a safety cap."""
     fmt = "%(id)s\t%(upload_date)s\t%(title)s\t%(webpage_url)s"
     cmd = [_yt_dlp_bin(), "--skip-download", "--ignore-errors", "--print", fmt]
+    if dateafter:
+        cmd += ["--dateafter", dateafter]
     if limit:
         cmd += ["--playlist-end", str(limit)]
     cmd.append(channel_url)
@@ -122,6 +143,18 @@ def list_channel_videos(channel_url: str, *, limit: int | None = None,
     return out
 
 
+def clean_summary(text: str) -> str:
+    """Strip gemma 'harmony' control tokens that leak into the summary, e.g. a
+    leading `<|channel>thought ... <channel|>` reasoning preamble plus any stray
+    `<|token|>` markers, leaving just the readable summary."""
+    t = text.strip()
+    m = re.match(r"\s*<\|?channel[^>]*>.*?<channel\|>\s*", t, re.DOTALL)
+    if m:
+        t = t[m.end():]
+    t = re.sub(r"<\|?[a-zA-Z_]+\|?>", "", t)
+    return t.strip()
+
+
 def run_vidsum(video: dict) -> str:
     """Run the vidsum CLI (its own venv) on one video URL; return the summary md."""
     tmp = tempfile.mkdtemp(prefix="vidsum_ingest_")
@@ -132,7 +165,7 @@ def run_vidsum(video: dict) -> str:
         if not mds:
             raise RuntimeError(
                 f"vidsum produced no summary: {proc.stderr.strip()[:300] or proc.stdout.strip()[:300]}")
-        return Path(mds[0]).read_text(encoding="utf-8")
+        return clean_summary(Path(mds[0]).read_text(encoding="utf-8"))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -147,23 +180,31 @@ def _default_extract(summary: str, upload_date: str | None) -> dict:
 def main():
     ap = argparse.ArgumentParser(description="Ingest market-analysis videos into the scenario corpus.")
     ap.add_argument("--channel", default=CHANNEL_URL, help="channel/playlist URL")
-    ap.add_argument("--limit", type=int, default=10, help="most-recent N uploads to consider")
-    ap.add_argument("--since", default=None, help="only uploads on/after YYYYMMDD")
+    ap.add_argument("--limit", type=int, default=10, help="safety cap: most-recent N uploads to consider")
+    ap.add_argument("--since", default=None, help="only uploads on/after YYYYMMDD (post-filter)")
+    ap.add_argument("--dateafter", default=None, help="yt-dlp --dateafter YYYYMMDD (server-side)")
+    ap.add_argument("--summaries-dir", default=None, help="also dump each raw summary .md into this folder")
     ap.add_argument("--retry-failed", action="store_true", help="re-attempt previously failed videos")
     args = ap.parse_args()
 
     if not args.channel:
         ap.error("no channel URL — set CHANNEL_URL in tools/video_ingest.py or pass --channel")
 
+    # thread --dateafter into the lister without changing ingest's injected-fn contract
+    lister = lambda url, *, limit, since: list_channel_videos(
+        url, limit=limit, since=since, dateafter=args.dateafter)
+
     print(f"listing up to {args.limit} videos from {args.channel} …")
     res = ingest(args.channel, CORPUS_PATH,
-                 list_videos=list_channel_videos, run_vidsum=run_vidsum,
+                 list_videos=lister, run_vidsum=run_vidsum,
                  extract=_default_extract, limit=args.limit, since=args.since,
-                 retry_failed=args.retry_failed)
+                 retry_failed=args.retry_failed, summaries_dir=args.summaries_dir)
     print(f"processed={len(res['processed'])} failed={len(res['failed'])} "
           f"skipped={len(res['skipped'])}")
     if res["failed"]:
         print("  failed:", ", ".join(res["failed"]))
+    if args.summaries_dir:
+        print(f"summaries → {args.summaries_dir} ({len(res['summaries'])} files)")
     print(f"corpus → {CORPUS_PATH}")
 
 
