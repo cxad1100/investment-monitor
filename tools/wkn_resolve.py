@@ -110,7 +110,7 @@ def _name_tokens(s: str) -> set[str]:
     return toks - _STOP
 
 
-_CCY = "DL|EO|SF|SK|DK|NK|CD|ZY|HD|LS|YC|PC|USD|EUR|CHF|GBP|SEK|DKK|NOK|HKD|JPY|GBX|PLN|CAD|CNY"
+_CCY = "DL|EO|SF|SK|DK|NK|CD|ZY|HD|LS|YC|PC|KC|UF|RC|USD|EUR|CHF|GBP|SEK|DKK|NOK|HKD|JPY|GBX|PLN|CAD|CNY"
 
 
 def _clean_name(name: str) -> str:
@@ -125,16 +125,19 @@ def _clean_name(name: str) -> str:
         'NOM.', 'NA', 'ORD', 'ACTIONS NOUVELLES', 'FRIA', 'CL.A'/'INC.A'/trailing 'A')
       - '+' (Yahoo trips on it) and runs of whitespace.
     Dots are kept (a de-glued variant handles abbreviations like SEMICON.MANU.)."""
-    s = (name or "").upper().replace("+", " ")                     # Yahoo trips on '+'
+    s = (name or "").upper().replace("+", " AND ")                 # 'A+B' -> 'A AND B'
     s = re.sub(r"^[A-Z0-9]+\s+/\s+", " ", s)                       # leading ticker prefix
-    s = re.sub(r"\([^)]*\b(?:VT|VTG|BL|SUB|P\.?\s*S)\b[^)]*\)", " ", s)  # voting/board-lot/pref parens
-    s = re.sub(r"\b(?:SPON?|UNSP|SP)\.?\s*AD[RS]S?\b|\bAD[RS]S?\b", " ", s)   # (SP./SPON./UNSP.)ADR/ADS
-    s = re.sub(r"\bSDR\b|\bNY\s+SH\w*|\bUTS\b", " ", s)            # SDR, NY shares, units
+    s = re.sub(r"\([^)]*\b(?:VT|VTG|BL|SUB|P\.?\s*S|SPLIT|PROM|STAPLED|DEL|RSU)\b[^)]*\)", " ", s)  # voting/lot/pref/action parens
+    s = re.sub(r"\b(?:SP|SPON|UNSP)\.?\s*(?:AD[RS]S?|GDR)\b.*", "", s)   # SP./SPON./UNSP. ADR/ADS/GDR + nuke after
+    s = re.sub(r"\b(?:AD[RS]S?|GDR|FDR|SDR|CVA)\b.*", "", s)            # depository receipt + everything after
+    s = re.sub(r"\bNY\s+SH(?:ARE)?S?\b.*", "", s)                       # NY shares + after
+    s = re.sub(r"-\s*RIGHTS\s+TO\s+RSU-?|\bUTS\b", " ", s)             # rights-to-RSU, units
     s = re.sub(r"/\s*\d+", " ", s)                                 # depository ratio /1 /120 /80000
-    s = s.replace("/", " ")                                        # leftover slash (ADR/, A/S)
+    s = s.replace("/", " ")                                        # leftover slash
     s = re.sub(r"\b(?:CL|CLASS)\.?\s*[A-Z]\b", " ", s)            # share class CL.A / CLASS B
     s = re.sub(r"\b(?:REGISTERED|REG|NOMINAT|NOM|NAMEN|NAM|INH|ORD|FRIA|RSP|NAVNE|AKTIER|"
-               r"NOUVELLES?|ACTIONS?|RED|VAR|VTG|VINK|VZO|NA|NEW|SHARES?|SHS|CCI|SUB|PS)\b\.?", " ", s)
+               r"NOUVELLES?|ACTIONS?|RED|VAR|VTG|VINK|VZO|NA|NEW|SHARES?|SHS|CCI|SUBD?|PS|"
+               r"POST|SPLIT|PROM|STAPLED|DEL|SBI)\b\.?", " ", s)  # registered/bearer/class/action jargon
     s = re.sub(rf"\b(?:{_CCY})(?=[-.,\s]*\d)\s*[-\d.,\s]*", " ", s)   # currency + par value (incl DL0,01)
     s = re.sub(rf"\b(?:{_CCY})\s*[-.,]+\s*$", " ", s)            # dangling currency w/o number 'DL-,'
     s = re.sub(r"\bO\.?\s*N\.?\b", " ", s)                        # O.N. (Ohne Nennwert)
@@ -151,7 +154,10 @@ _ABBR = {
     "FIN": "FINANCIAL", "PHARM": "PHARMACEUTICALS", "RES": "RESOURCES",
     "IND": "INDUSTRIES", "INDS": "INDUSTRIES", "SVCS": "SERVICES", "SVC": "SERVICES",
     "COMM": "COMMUNICATIONS", "MTLS": "MATERIALS", "MATLS": "MATERIALS",
-    "PPTYS": "PROPERTIES", "BCO": "BANCO", "BK": "BANK", "BQUE": "BANQUE",
+    "PPTYS": "PROPERTIES", "PTIES": "PROPERTIES", "PTS": "PROPERTIES",
+    "BCO": "BANCO", "BK": "BANK", "BQUE": "BANQUE", "ENTMT": "ENTERTAINMENT",
+    "ENTP": "ENTERPRISE", "MINLS": "MINERALS", "MNS": "MINES", "UTD": "UNITED",
+    "HLD": "HOLDING",
 }
 
 
