@@ -64,13 +64,17 @@ OUT_META = ROOT / "data" / "eur_delisted.csv"
 OUT_PRICES = ROOT / "data" / "momentum_dead_prices.csv"
 
 
-def build_dead_table(seed: list[dict], *, fetch_history, today=None):
+def build_dead_table(seed: list[dict], *, fetch_history, today=None,
+                     min_price_alive: float = 1.0):
     """Seed/removal candidates → (dead-meta DataFrame, dead-prices DataFrame).
 
-    `fetch_history(ticker) -> pd.Series` is injected (yfinance/Stooq live, fake in
-    tests). Keeps only names whose prices stop near removal (classify_dead), are
-    ≥ €1, and have ≤ their recorded spread. Each kept column is truncated at its
-    delisting date so its last bar is the last traded price.
+    `fetch_history(ticker) -> pd.Series` is injected (EODHD live, fake in tests).
+    Keeps only names whose prices stop near removal (classify_dead → dead) AND that
+    were a real holding while alive — **peak** price ≥ `min_price_alive`. The peak
+    test (not the last price) is deliberate: a fallen giant like Wirecard dies at
+    €0.40 but was a €100 stock, and those collapses are the whole point; only
+    perpetual sub-€1 penny names are excluded. Each kept column is truncated at its
+    delisting date so its last bar is the last traded price the graveyard uses.
     """
     today = pd.Timestamp(today or pd.Timestamp.today().normalize())
     rows, cols = [], {}
@@ -82,15 +86,16 @@ def build_dead_table(seed: list[dict], *, fetch_history, today=None):
         if dl is None:
             continue                                       # still trading → not dead
         s = s.loc[:dl].dropna()                            # truncate at death
-        cand = {"ticker": c["ticker"], "name": c.get("name", c["ticker"]),
-                "sector": c.get("sector", "Unknown"),
-                "delisting_date": dl, "last_price": float(s.iloc[-1]),
-                "spread_pct": float(c.get("spread_pct", 0.5))}
-        for kept in keep_real([cand]):
-            rows.append(kept)
-            cols[c["ticker"]] = s
-    meta = pd.DataFrame(rows, columns=["ticker", "name", "sector",
-                                       "delisting_date", "last_price", "spread_pct"])
+        peak = float(s.max())
+        if peak < min_price_alive:                         # perpetual penny — never a real holding
+            continue
+        rows.append({"ticker": c["ticker"], "name": c.get("name", c["ticker"]),
+                     "sector": c.get("sector", "Unknown"), "delisting_date": dl,
+                     "last_price": float(s.iloc[-1]), "peak_price": peak,
+                     "spread_pct": float(c.get("spread_pct", 0.5))})
+        cols[c["ticker"]] = s
+    meta = pd.DataFrame(rows, columns=["ticker", "name", "sector", "delisting_date",
+                                       "last_price", "peak_price", "spread_pct"])
     prices = pd.DataFrame(cols)
     return meta, prices
 

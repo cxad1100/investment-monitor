@@ -24,12 +24,14 @@ def test_fetch_eod_none_on_empty():
     assert fetch_eod("X.Y", key="x", get_fn=lambda url: "[]") is None
 
 
-def test_delisted_candidates_builds_symbols_for_common_stock():
+def test_delisted_candidates_keeps_domestic_common_stock_only():
     rows = [
         {"Code": "WDI", "Name": "Wirecard AG", "Isin": "DE0007472060",
-         "Exchange": "XETRA", "Currency": "EUR", "Type": "Common Stock"},
+         "Exchange": "XETRA", "Currency": "EUR", "Type": "Common Stock"},   # DE death — keep
         {"Code": "0IIA", "Name": "GPF Physical Gold ETC", "Isin": "XS2265368097",
-         "Exchange": "XETRA", "Currency": "EUR", "Type": "ETF"},        # not common stock
+         "Exchange": "XETRA", "Currency": "EUR", "Type": "ETF"},            # ETC — drop
+        {"Code": "02M", "Name": "The Mosaic Company", "Isin": "US61945C1036",
+         "Exchange": "XETRA", "Currency": "EUR", "Type": "Common Stock"},   # foreign withdrawal — drop
     ]
     cands = delisted_candidates(rows)
     assert len(cands) == 1

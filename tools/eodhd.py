@@ -50,23 +50,29 @@ def fetch_eod(symbol: str, *, key: str | None = None, start: str = "2018-01-01",
     return s if len(s) else None
 
 
-def delisted_candidates(rows: list[dict], *, default_spread_pct: float = 0.5) -> list[dict]:
-    """EODHD delisted-list rows → dead-listing candidates.
+def delisted_candidates(rows: list[dict], *, default_spread_pct: float = 0.5,
+                        isin_prefix: str | None = "DE") -> list[dict]:
+    """EODHD delisted-list rows → true-death candidates.
 
-    A terminated XETRA/Frankfurt common-stock LISTING is a real graveyard event
-    for a TR position regardless of the issuer's fate elsewhere, so we keep all
-    common stocks (any domicile); the in-window + ≥€1 filtering happens after the
-    EOD fetch (classify_dead / keep_real). Spread is unknown for a dead listing —
-    a conservative default is used; the price floor drops the penny noise.
+    Restricted to domestic issuers (ISIN prefix, default "DE" — a German company
+    off its home XETRA/Frankfurt listing is genuinely dead). Foreign cross-listings
+    that merely *left* Frankfurt at fair value (Mosaic, Chubu) and mislabeled ETCs
+    are excluded — they are not survivorship holes in the German universe. The
+    in-window (2018→) + ≥€1 filtering happens after the EOD fetch (classify_dead /
+    keep_real); spread is unknown for a dead listing, so a conservative default is
+    used and the price floor drops penny noise.
     """
     out, seen = [], set()
     for r in rows:
         if r.get("Type") != "Common Stock":
             continue
-        isin = str(r.get("Isin", "")) or f"{r.get('Code')}.{r.get('Exchange')}"
-        if isin in seen:
+        isin = str(r.get("Isin", ""))
+        if isin_prefix and not isin.startswith(isin_prefix):
             continue
-        seen.add(isin)
+        key = isin or f"{r.get('Code')}.{r.get('Exchange')}"
+        if key in seen:
+            continue
+        seen.add(key)
         out.append({"ticker": f"{r['Code']}.{r['Exchange']}",
                     "name": str(r.get("Name", r["Code"])), "isin": isin,
                     "sector": "Unknown", "spread_pct": default_spread_pct,
