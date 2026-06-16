@@ -135,8 +135,11 @@ def run_momentum(prices: pd.DataFrame, slippage_bps: dict, *, k: int = 15,
         else:
             picks = select_topk(scores, elig, k,
                                  sectors=sectors if sector_neutral else None)
+        dead = {t for t in picks
+                if pit is not None and t in pit.died_between(d, dates[i + 1])}
         holdings_log.append(dict(date=d, next=dates[i + 1], picks=picks,
-                                 scores={t: float(scores[t]) for t in picks}))
+                                 scores={t: float(scores[t]) for t in picks},
+                                 ret={}, dead=dead))
 
     runs = {}
     for mult in cost_mults:
@@ -172,6 +175,7 @@ def run_momentum(prices: pd.DataFrame, slippage_bps: dict, *, k: int = 15,
                     eq_points.append((day, equity_val))
             for t in picks:
                 name_ret = float(seg[t].iloc[-1] / seg[t].iloc[0] - 1.0)
+                h["ret"][t] = name_ret                  # per-pick period return (gross, for the timeline)
                 c = (fee_eur + slippage_bps[t] / 1e4 * w) * mult \
                     if t in traded else 0.0
                 trades.append(dict(pair=t, entry=d, exit=nxt, days=len(seg) - 1,

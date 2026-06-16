@@ -75,7 +75,9 @@ def run_grid(prices, slippage_bps, *, sectors=None, benchmark=None, pit=None,
             train=_stats_slice(eq, tr, eq.index[0], te, capital),
             val=_stats_slice(eq, tr, te + pd.Timedelta(days=1), eq.index[-1], capital),
             full=r["runs"][1.0]["stats"],
-            trades_per_year=len(tr) / years))
+            trades_per_year=len(tr) / years,
+            timeline=[dict(date=str(h["date"].date()), ret=h["ret"], dead=list(h["dead"]))
+                      for h in r["holdings_log"]]))
     return dict(cells=cells, train_end=train_end)
 
 

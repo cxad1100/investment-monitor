@@ -33,7 +33,7 @@ K            = 15
 LOOKBACK     = 252
 SKIP         = 21
 REBAL        = "M"
-START        = "2023-01-01"   # first rebalance; scores still use full prior history (no look-ahead)
+START        = "2018-01-01"   # first rebalance (MiFID era); full 9y survivorship-corrected window
 LIQ_MAX      = 30
 MIN_PRICE    = 1.0        # drop sub-€1 penny listings (12-1 momentum = tick noise there)
 CAPITAL      = 10_000.0   # paper account, EUR
@@ -322,6 +322,45 @@ def sec_feasibility(d: dict) -> str:
             f"Pays for itself: <b>{'yes' if f['pays_for_itself'] else 'no'}</b>.</p>")
 
 
+def _pnl_color(ret: float, dead: bool) -> str:
+    if dead:
+        return "#000000"                  # defaulted / delisted
+    if ret >= 0.20:
+        return "#0a6b00"                  # a lot positive
+    if ret >= 0.0:
+        return "#46c84e"                  # positive
+    if ret > -0.20:
+        return "#ef4444"                  # negative
+    return "#7a0000"                       # a lot negative
+
+
+def sec_timelines(d: dict) -> str:
+    g = d.get("grid")
+    if not g:
+        return ""
+    blocks = []
+    for c in sorted(g["cells"], key=lambda c: c["val"]["sharpe"], reverse=True):
+        lines = []
+        for row in c["timeline"]:
+            dead = set(row["dead"])
+            spans = " ".join(
+                f"<span style='color:{_pnl_color(r, t in dead)}' title='{t} {r:+.0%}'>{t}</span>"
+                for t, r in row["ret"].items())
+            spans = spans or "<span class='dim'>cash</span>"
+            lines.append(f"<div><span class='mono dim'>{row['date']}</span> {spans}</div>")
+        blocks.append(
+            f"<details><summary>{c['code']} · val Sharpe {c['val']['sharpe']:.2f} · "
+            f"{c['trades_per_year']:.0f} tr/yr</summary>"
+            f"<div style='font-size:0.78rem;line-height:1.7'>{''.join(lines)}</div></details>")
+    return ("<h2>Monthly picks per variation</h2>"
+            "<p class='dim'>Each line is one rebalance's equal-weight picks, colored by that "
+            "holding period's return — <span style='color:#0a6b00'>■</span> ≥+20% · "
+            "<span style='color:#46c84e'>■</span> up · <span style='color:#ef4444'>■</span> down · "
+            "<span style='color:#7a0000'>■</span> ≤−20% · <span style='color:#000'>■</span> "
+            "defaulted. Hover a ticker for its %. All 64 variations, collapsed.</p>"
+            + "".join(blocks))
+
+
 # ── Assembly ──────────────────────────────────────────────────────────────────
 
 def build(d: dict, public: bool = False) -> str:
@@ -342,6 +381,7 @@ def build(d: dict, public: bool = False) -> str:
         sec_survivorship(d) if not public else "",
         sec_grid(d) if not public else "",
         sec_feasibility(d) if not public else "",
+        sec_timelines(d) if not public else "",
         sec_method(),
     ])
     return page(title, body)

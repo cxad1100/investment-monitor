@@ -182,6 +182,9 @@ def test_run_momentum_graveyard_liquidates_dead_holding():
         if h["date"] > idx[359]:
             assert "BOMB" not in h["picks"]                       # dead → never picked after death
     assert r["runs"][0.0]["equity"].notna().all()                # no NaN from the dead leg
+    h0 = next(h for h in r["holdings_log"] if h["picks"])
+    assert "ret" in h0 and "dead" in h0                          # timeline data attached
+    assert all(t in h0["ret"] for t in h0["picks"])              # every pick has a period return
 
 
 from tools.momentum import benchmark_curves, equal_weight_curve
@@ -251,3 +254,11 @@ def test_grid_sections_local_only():
     d["grid"] = None                                   # gather may skip the grid
     html_pub = bmr.build(d, public=True)
     assert "64-permutation" not in html_pub            # grid is private-only
+
+
+def test_pnl_color_buckets():
+    assert bmr._pnl_color(0.30, False) == "#0a6b00"    # a lot up → dark green
+    assert bmr._pnl_color(0.05, False) == "#46c84e"    # up → green
+    assert bmr._pnl_color(-0.05, False) == "#ef4444"   # down → red
+    assert bmr._pnl_color(-0.40, False) == "#7a0000"   # a lot down → dark red
+    assert bmr._pnl_color(0.30, True) == "#000000"     # defaulted overrides → black
