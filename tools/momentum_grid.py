@@ -77,3 +77,12 @@ def run_grid(prices, slippage_bps, *, sectors=None, benchmark=None, pit=None,
             full=r["runs"][1.0]["stats"],
             trades_per_year=len(tr) / years))
     return dict(cells=cells, train_end=train_end)
+
+
+def feasibility(cell: dict, *, capital: float = 10_000.0, fee_eur: float = 1.0) -> dict:
+    """Phase-6: fixed-fee drag on a €`capital` account. annual_fee = trades/yr × fee;
+    fee_drag_pct = that as % of capital; pays_for_itself = net return clears the drag."""
+    annual_fee = cell["trades_per_year"] * fee_eur
+    drag_pct = annual_fee / capital * 100.0
+    return dict(annual_fee_eur=annual_fee, fee_drag_pct=drag_pct,
+                pays_for_itself=cell["full"]["net_return"] * 100.0 > drag_pct)

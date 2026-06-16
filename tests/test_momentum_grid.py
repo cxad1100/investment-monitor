@@ -42,3 +42,14 @@ def test_run_grid_splits_train_val_and_covers_configs():
     for part in ("train", "val", "full"):
         assert "sharpe" in cell[part] and "net_return" in cell[part]
     assert cell["trades_per_year"] >= 0
+
+
+from tools.momentum_grid import feasibility
+
+
+def test_feasibility_fee_drag_arithmetic():
+    cell = {"code": "······", "trades_per_year": 40.0, "full": {"net_return": 0.50}}
+    f = feasibility(cell, capital=10_000.0, fee_eur=1.0)
+    assert abs(f["annual_fee_eur"] - 40.0) < 1e-9          # 40 trades × €1
+    assert abs(f["fee_drag_pct"] - 0.40) < 1e-9            # €40 / €10k = 0.40%
+    assert f["pays_for_itself"] is True                    # net 50% >> drag
