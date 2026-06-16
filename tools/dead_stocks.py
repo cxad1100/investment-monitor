@@ -132,17 +132,55 @@ def load_seed() -> list[dict]:
     return pd.read_csv(SEED_CSV).to_dict("records")
 
 
-def main():
-    seed = load_seed()
-    print(f"dead-stock seed: {len(seed)} candidates")
-    meta, prices = build_dead_table(seed, fetch_history=fetch_dead_history)
+DEAD_DIR = ROOT / "data" / "dead_prices"      # committed per-ticker immutable history
+
+
+def load_dead_prices():
+    """Committed per-ticker dead price CSVs → (prices DataFrame, {ticker: delisting})."""
+    if not DEAD_DIR.exists():
+        return pd.DataFrame(), {}
+    cols, delist = {}, {}
+    for f in sorted(DEAD_DIR.glob("*.csv")):
+        s = pd.read_csv(f, index_col=0, parse_dates=True).iloc[:, 0].dropna()
+        if len(s):
+            cols[f.stem] = s
+            delist[f.stem] = s.index[-1]
+    return pd.DataFrame(cols), delist
+
+
+def main(limit: int | None = None):
+    """Backfill dead-listing history. Prefers EODHD (paid plan returns full delisted
+    history); falls back to the seed list + yfinance/Stooq when no key. Writes
+    committed per-ticker CSVs to data/dead_prices/ + the meta to eur_delisted.csv."""
+    from tools import eodhd
+    key = eodhd.api_key()
+    if key:
+        cands = eodhd.delisted_candidates(eodhd.fetch_delisted_list(key=key))
+        print(f"EODHD delisted candidates: {len(cands)}")
+        fetch = lambda t: eodhd.fetch_eod(t, key=key)           # noqa: E731
+    else:
+        cands = load_seed()
+        print(f"no EODHD key — seed candidates: {len(cands)}")
+        fetch = fetch_dead_history
+    if limit:
+        cands = cands[:limit]
+
+    meta, prices = build_dead_table(cands, fetch_history=fetch)
     if not meta.empty:
         meta["slippage_bps"] = meta["spread_pct"].map(_spread_to_slippage_bps)
+
+    DEAD_DIR.mkdir(parents=True, exist_ok=True)
+    for t in prices.columns:
+        col = prices[t].dropna()
+        if len(col):
+            col.rename("close").to_csv(DEAD_DIR / f"{t}.csv", header=True)
     OUT_META.parent.mkdir(exist_ok=True)
     meta.to_csv(OUT_META, index=False)
-    prices.to_csv(OUT_PRICES)
-    print(f"kept {len(meta)} dead names → {OUT_META.name}, {prices.shape[1]} price cols")
+    print(f"kept {len(meta)} dead listings → {OUT_META.name}; "
+          f"{len(list(DEAD_DIR.glob('*.csv')))} price files in {DEAD_DIR.name}/")
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    lim = next((int(a.split("=")[1]) for a in sys.argv if a.startswith("--limit=")), None)
+    main(limit=lim)
