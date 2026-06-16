@@ -50,3 +50,99 @@ def keep_real(candidates: list[dict], *, min_price: float = 1.0,
         if lp >= min_price and sp <= max_spread_pct:
             out.append(c)
     return out
+
+
+# ── network adapters + CLI (best-effort; seed CSV guarantees real dead names) ──
+
+import io
+import urllib.request
+
+import yfinance as yf
+
+SEED_CSV = ROOT / "data" / "eur_delisted_seed.csv"
+OUT_META = ROOT / "data" / "eur_delisted.csv"
+OUT_PRICES = ROOT / "data" / "momentum_dead_prices.csv"
+
+
+def build_dead_table(seed: list[dict], *, fetch_history, today=None):
+    """Seed/removal candidates → (dead-meta DataFrame, dead-prices DataFrame).
+
+    `fetch_history(ticker) -> pd.Series` is injected (yfinance/Stooq live, fake in
+    tests). Keeps only names whose prices stop near removal (classify_dead), are
+    ≥ €1, and have ≤ their recorded spread. Each kept column is truncated at its
+    delisting date so its last bar is the last traded price.
+    """
+    today = pd.Timestamp(today or pd.Timestamp.today().normalize())
+    rows, cols = [], {}
+    for c in seed:
+        s = fetch_history(c["ticker"])
+        if s is None or s.dropna().empty:
+            continue
+        dl = classify_dead(s, removal_date=pd.Timestamp(c["removal_date"]), today=today)
+        if dl is None:
+            continue                                       # still trading → not dead
+        s = s.loc[:dl].dropna()                            # truncate at death
+        cand = {"ticker": c["ticker"], "name": c.get("name", c["ticker"]),
+                "sector": c.get("sector", "Unknown"),
+                "delisting_date": dl, "last_price": float(s.iloc[-1]),
+                "spread_pct": float(c.get("spread_pct", 0.5))}
+        for kept in keep_real([cand]):
+            rows.append(kept)
+            cols[c["ticker"]] = s
+    meta = pd.DataFrame(rows, columns=["ticker", "name", "sector",
+                                       "delisting_date", "last_price", "spread_pct"])
+    prices = pd.DataFrame(cols)
+    return meta, prices
+
+
+def _spread_to_slippage_bps(spread_pct: float) -> int:
+    """Full spread % → per-leg half-spread bps, clamped [2, 75] (≤1.5% ⇒ ≤75)."""
+    return int(min(75, max(2, round(spread_pct / 2 * 100))))
+
+
+def fetch_dead_history(ticker: str):
+    """Daily closes up to delisting via yfinance, Stooq CSV fallback. None if both
+    fail. Best-effort — wrapped so a single dead name never aborts a batch."""
+    try:
+        df = yf.download(ticker, period="max", auto_adjust=True, progress=False)
+        close = df["Close"] if "Close" in df else df
+        s = close.dropna()
+        if getattr(s.index, "tz", None) is not None:
+            s.index = s.index.tz_localize(None)
+        if not s.empty:
+            return s.squeeze()
+    except Exception:
+        pass
+    try:                                                   # Stooq: lowercase, .F→.de
+        sym = ticker.lower().replace(".f", ".de")
+        url = f"https://stooq.com/q/d/l/?s={sym}&i=d"
+        raw = urllib.request.urlopen(url, timeout=20).read().decode()
+        df = pd.read_csv(io.StringIO(raw))
+        if "Date" in df and "Close" in df:
+            return pd.Series(df["Close"].values,
+                             index=pd.to_datetime(df["Date"])).dropna()
+    except Exception:
+        pass
+    return None
+
+
+def load_seed() -> list[dict]:
+    if not SEED_CSV.exists():
+        return []
+    return pd.read_csv(SEED_CSV).to_dict("records")
+
+
+def main():
+    seed = load_seed()
+    print(f"dead-stock seed: {len(seed)} candidates")
+    meta, prices = build_dead_table(seed, fetch_history=fetch_dead_history)
+    if not meta.empty:
+        meta["slippage_bps"] = meta["spread_pct"].map(_spread_to_slippage_bps)
+    OUT_META.parent.mkdir(exist_ok=True)
+    meta.to_csv(OUT_META, index=False)
+    prices.to_csv(OUT_PRICES)
+    print(f"kept {len(meta)} dead names → {OUT_META.name}, {prices.shape[1]} price cols")
+
+
+if __name__ == "__main__":
+    main()

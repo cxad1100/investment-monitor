@@ -38,3 +38,31 @@ def test_keep_real_filters_penny_and_wide_spread():
     ]
     kept = {c["ticker"] for c in keep_real(cands, min_price=1.0, max_spread_pct=1.5)}
     assert kept == {"WDI.DE"}
+
+
+from tools.dead_stocks import build_dead_table
+
+
+def _fake_history(ticker):
+    # WDI.DE dies; ALIVE.DE keeps trading to today
+    idx = pd.bdate_range("2019-01-01", periods=400)
+    if ticker == "WDI.DE":
+        return pd.Series(list(np.linspace(100, 1.5, 200)) + [np.nan] * 200, index=idx)
+    return pd.Series(np.linspace(20, 40, 400), index=idx)
+
+
+def test_build_dead_table_from_seed_classifies_and_filters():
+    seed = [
+        {"ticker": "WDI.DE", "name": "Wirecard", "sector": "Internet & Software",
+         "removal_date": "2019-10-01", "spread_pct": 0.30},
+        {"ticker": "ALIVE.DE", "name": "Still Trading", "sector": "Vehicles",
+         "removal_date": "2019-06-01", "spread_pct": 0.30},
+    ]
+    today = pd.bdate_range("2019-01-01", periods=400)[-1]
+    table, prices = build_dead_table(seed, fetch_history=_fake_history, today=today)
+    assert list(table["ticker"]) == ["WDI.DE"]            # ALIVE.DE rejected (not dead)
+    assert pd.notna(table.iloc[0]["delisting_date"])
+    assert "WDI.DE" in prices.columns
+    # dead column is truncated at delisting (no data after)
+    dl = pd.Timestamp(table.iloc[0]["delisting_date"])
+    assert prices["WDI.DE"].dropna().index[-1] == dl
