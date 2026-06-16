@@ -63,10 +63,27 @@ def eligible(prices: pd.DataFrame, asof, slippage_bps: dict,
     return out
 
 
-def select_topk(scores: pd.Series, eligible_set: set[str], k: int) -> list[str]:
-    """Top-k tickers by score, restricted to the eligible set, highest first."""
-    s = scores[[t for t in scores.index if t in eligible_set]]
-    return list(s.sort_values(ascending=False).head(k).index)
+def select_topk(scores: pd.Series, eligible_set: set[str], k: int,
+                sectors: dict | None = None) -> list[str]:
+    """Top-k tickers by score, restricted to the eligible set, highest first. When
+    `sectors` is given (upgrade B), fill k by round-robin over distinct sectors —
+    the best remaining name per sector each pass — structurally capping single-sector
+    concentration. 'Unknown' is one bucket like any other (≤ one per pass)."""
+    s = scores[[t for t in scores.index if t in eligible_set]].sort_values(ascending=False)
+    if sectors is None:
+        return list(s.head(k).index)
+    by_sec: dict[str, list[str]] = {}
+    for t in s.index:                                  # already score-desc
+        by_sec.setdefault(sectors.get(t, "Unknown"), []).append(t)
+    order = sorted(by_sec, key=lambda sec: s[by_sec[sec][0]], reverse=True)
+    picks: list[str] = []
+    while len(picks) < k and any(by_sec.values()):
+        for sec in order:
+            if by_sec[sec]:
+                picks.append(by_sec[sec].pop(0))
+                if len(picks) >= k:
+                    break
+    return picks
 
 
 def run_momentum(prices: pd.DataFrame, slippage_bps: dict, *, k: int = 15,

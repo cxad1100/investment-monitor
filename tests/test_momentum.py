@@ -33,6 +33,15 @@ def test_select_topk_ranks_and_respects_eligibility():
     assert picks2 == ["A", "C"]                       # k larger than pool is fine
 
 
+def test_select_topk_sector_neutral_round_robin():
+    scores = pd.Series({"A1": 0.9, "A2": 0.8, "A3": 0.7, "B1": 0.6, "C1": 0.5})
+    sectors = {"A1": "Tech", "A2": "Tech", "A3": "Tech", "B1": "Energy", "C1": "Banks"}
+    elig = set(scores.index)
+    picks = select_topk(scores, elig, k=3, sectors=sectors)
+    assert picks == ["A1", "B1", "C1"]               # best of each distinct sector first
+    assert select_topk(scores, elig, k=3) == ["A1", "A2", "A3"]   # plain = global top-3
+
+
 def test_rebalance_dates_monthly_count():
     idx = pd.bdate_range("2022-01-03", periods=400)   # ~19 months
     dates = rebalance_dates(idx, "M")
