@@ -66,6 +66,13 @@ def test_rebalance_dates_monthly_count():
         assert d == same_month[-1]
 
 
+def test_rebalance_dates_quarterly():
+    idx = pd.bdate_range("2020-01-01", periods=520)   # ~2 years
+    q = rebalance_dates(idx, "Q")                       # upgrade E uses freq="Q"
+    assert 6 <= len(q) <= 9                             # ~8 quarter-ends
+    assert all(d in idx for d in q) and q == sorted(q)
+
+
 def _rw(seed, n=400, drift=0.0):
     rng = np.random.default_rng(seed)
     return 100.0 * np.exp(np.cumsum(rng.normal(drift, 0.01, n)))

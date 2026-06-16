@@ -18,8 +18,8 @@ from tools.pairs_backtest import backtest_stats
 def rebalance_dates(index, freq: str = "M") -> list[pd.Timestamp]:
     """Last trading day present in the index for each period (default month)."""
     idx = pd.DatetimeIndex(index)
-    # Map deprecated "M" to "ME" for pandas compatibility
-    actual_freq = "ME" if freq == "M" else freq
+    # Map deprecated period aliases to the period-END forms pandas now requires.
+    actual_freq = {"M": "ME", "Q": "QE", "Y": "YE"}.get(freq, freq)
     last = pd.Series(idx, index=idx).resample(actual_freq).last().dropna()
     return list(last)
 
@@ -53,12 +53,13 @@ def eligible(prices: pd.DataFrame, asof, slippage_bps: dict,
     price >= min_price. The price floor drops sub-EUR1 penny listings whose 12-1
     momentum is dominated by tick/illiquidity noise rather than real return."""
     hist = prices.loc[:asof]
+    last = hist.ffill().iloc[-1]                  # last valid price per ticker (vectorized)
+    count = hist.notna().sum()                    # observations per ticker (vectorized)
     out: set[str] = set()
     for t in prices.columns:
         if slippage_bps.get(t, 10**9) > liq_max:
             continue
-        col = hist[t].dropna()
-        if len(col) >= min_obs and float(col.iloc[-1]) >= min_price:
+        if count[t] >= min_obs and last[t] >= min_price:
             out.add(t)
     return out
 
