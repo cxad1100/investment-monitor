@@ -236,3 +236,11 @@ def test_private_report_builds_nonempty():
     html = bmr.build(d, public=False)
     assert "<html" in html.lower() and "momentum" in html.lower()
     assert "Sharpe" in html
+
+
+def test_grid_sections_local_only():
+    assert hasattr(bmr, "sec_grid") and hasattr(bmr, "sec_survivorship")
+    d = _fake_gather()
+    d["grid"] = None                                   # gather may skip the grid
+    html_pub = bmr.build(d, public=True)
+    assert "64-permutation" not in html_pub            # grid is private-only

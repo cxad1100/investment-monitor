@@ -15,6 +15,7 @@ import webbrowser
 from datetime import datetime
 from pathlib import Path
 
+import pandas as pd
 import plotly.graph_objects as go
 
 from tools import theme
@@ -23,12 +24,16 @@ from tools.momentum import run_momentum, benchmark_curves, equal_weight_curve
 from tools.pairs_universe import UNIVERSE, fetch_prices
 from tools.portfolio_tools import BENCHMARKS
 from tools.data_buffer import cached_price_history
+from tools.universe_pit import PITUniverse
+from tools.universe_assemble import delisting_map
+from tools.momentum_grid import run_grid, feasibility
 
 # ── Settings (one place) ──────────────────────────────────────────────────────
 K            = 15
 LOOKBACK     = 252
 SKIP         = 21
 REBAL        = "M"
+START        = "2023-01-01"   # first rebalance; scores still use full prior history (no look-ahead)
 LIQ_MAX      = 30
 MIN_PRICE    = 1.0        # drop sub-€1 penny listings (12-1 momentum = tick noise there)
 CAPITAL      = 10_000.0   # paper account, EUR
@@ -38,6 +43,8 @@ COST_MULTS   = (0.0, 1.0, 2.0)
 REBAL_LABEL = {"M": "monthly", "W": "weekly", "Q": "quarterly"}
 
 ROOT = Path(__file__).parent
+PRICES_CSV = ROOT / "data" / "momentum_prices.csv"
+META_CSV = ROOT / "data" / "momentum_meta.csv"
 
 
 def _broker(t: str) -> str:
@@ -50,22 +57,38 @@ def _broker(t: str) -> str:
 
 # ── Data assembly ─────────────────────────────────────────────────────────────
 
-def gather(force: bool = False, refresh: bool | None = None) -> dict:
-    # `force` is the live-server convention; `refresh` kept for the CLI flag.
-    refresh = force if refresh is None else refresh
-    prices = fetch_prices(refresh=refresh)
-    slip = {t: UNIVERSE[t]["slippage_bps"] for t in UNIVERSE}
+def _slip(m) -> int:
+    v = m.get("slippage_bps")
+    return int(v) if pd.notna(v) else 30
 
-    res = run_momentum(prices, slip, k=K, lookback=LOOKBACK, skip=SKIP,
-                       capital=CAPITAL, cost_mults=COST_MULTS, freq=REBAL,
-                       liq_max=LIQ_MAX, fee_eur=FEE_EUR, min_price=MIN_PRICE)
+
+def gather(force: bool = False, refresh: bool | None = None, with_grid: bool = True) -> dict:
+    """Load the survivorship-corrected dataset (survivors ∪ 270 dead), run the
+    walk-forward with the active graveyard, and (when `with_grid`) the 64-permutation
+    matrix. `force`/`refresh` only re-fetch the benchmark series."""
+    refresh = force if refresh is None else refresh
+    prices = pd.read_csv(PRICES_CSV, index_col=0, parse_dates=True)
+    meta_df = pd.read_csv(META_CSV)
+    meta = {r["ticker"]: dict(r) for _, r in meta_df.iterrows()}
+    sectors = {t: (str(m["sector"]) if pd.notna(m.get("sector")) else "Unknown")
+               for t, m in meta.items()}
+    slip = {t: _slip(m) for t, m in meta.items() if t in prices.columns}
+    pit = PITUniverse(prices, delisting_map(meta_df))
 
     bench_tickers = [tk for _, (tk, _) in BENCHMARKS.items()]
-    bench_raw = cached_price_history(bench_tickers, period="5y", force=refresh)
+    bench_raw = cached_price_history(bench_tickers, period="9y", force=refresh)
     bench = bench_raw.rename(columns={tk: name for name, (tk, _) in BENCHMARKS.items()})
+    spx = bench["S&P 500"] if "S&P 500" in bench.columns else bench.iloc[:, 0]
 
-    return dict(prices=prices, res=res, benchmarks=bench, capital=CAPITAL,
-                meta={t: UNIVERSE[t] for t in UNIVERSE})
+    res = run_momentum(prices, slip, k=K, lookback=LOOKBACK, skip=SKIP, capital=CAPITAL,
+                       cost_mults=COST_MULTS, freq=REBAL, liq_max=LIQ_MAX, fee_eur=FEE_EUR,
+                       min_price=MIN_PRICE, start=START, pit=pit)
+    grid = (run_grid(prices, slip, sectors=sectors, benchmark=spx, pit=pit, start=START,
+                     train_end="2022-12-31", capital=CAPITAL, lookback=LOOKBACK, skip=SKIP)
+            if with_grid else None)
+
+    return dict(prices=prices, res=res, benchmarks=bench, capital=CAPITAL, meta=meta,
+                grid=grid, n_dead=int(meta_df["delisting_date"].notna().sum()))
 
 
 def _equity_window(res: dict):
@@ -253,6 +276,52 @@ that truncating future data leaves past scores and past holdings unchanged.</p>
 """
 
 
+def sec_survivorship(d: dict) -> str:
+    n = d.get("n_dead", 0)
+    if not n:
+        return ""
+    return (f'<div class="note warn"><b>Survivorship-corrected.</b> The universe '
+            f'includes <b>{n}</b> EUR-listed names that delisted/died 2018→now '
+            f'(e.g. Wirecard, peak €195 → €0.40), held until their delisting date and '
+            f'liquidated by the graveyard at the last traded price — so the backtest '
+            f'can buy a name that later goes to zero and eat the loss.</div>')
+
+
+def sec_grid(d: dict) -> str:
+    g = d.get("grid")
+    if not g:
+        return ""
+    rows = []
+    for c in sorted(g["cells"], key=lambda c: c["val"]["sharpe"], reverse=True):
+        rows.append(
+            f"<tr><td class='mono'>{c['code']}</td>"
+            f"<td class='num'>{_pct(c['train']['net_return'] * 100)}</td>"
+            f"<td class='num mono'>{c['train']['sharpe']:.2f}</td>"
+            f"<td class='num'>{_pct(c['val']['net_return'] * 100)}</td>"
+            f"<td class='num mono'>{c['val']['sharpe']:.2f}</td>"
+            f"<td class='num mono'>{c['trades_per_year']:.0f}</td></tr>")
+    return ("<h2>64-permutation grid (A·B·C·D·E·F)</h2>"
+            "<p class='dim'>A vol-adj · B sector-neutral · C trend-filter · D 10-slot · "
+            "E quarterly · F lazy. Ranked by <b>validation</b> Sharpe (out-of-sample); "
+            "train = 2018–2022, validation = 2023→. Pick a config that holds up in BOTH "
+            "columns, not the best train cell.</p>"
+            "<table><tr><th>Cfg</th><th class='num'>Train ret</th><th class='num'>Train Sh</th>"
+            "<th class='num'>Val ret</th><th class='num'>Val Sh</th>"
+            "<th class='num'>Trades/yr</th></tr>" + "".join(rows) + "</table>")
+
+
+def sec_feasibility(d: dict) -> str:
+    g = d.get("grid")
+    if not g:
+        return ""
+    best = max(g["cells"], key=lambda c: c["val"]["sharpe"])
+    f = feasibility(best, capital=d["capital"], fee_eur=FEE_EUR)
+    return (f"<h3>Small-account feasibility (best val cell {best['code']})</h3>"
+            f"<p class='dim'>{best['trades_per_year']:.0f} trades/yr × €{FEE_EUR:.0f} = "
+            f"€{f['annual_fee_eur']:.0f}/yr = {f['fee_drag_pct']:.2f}% of €{d['capital']:,.0f}. "
+            f"Pays for itself: <b>{'yes' if f['pays_for_itself'] else 'no'}</b>.</p>")
+
+
 # ── Assembly ──────────────────────────────────────────────────────────────────
 
 def build(d: dict, public: bool = False) -> str:
@@ -270,6 +339,9 @@ def build(d: dict, public: bool = False) -> str:
         sec_stats(d, public),
         sec_rebalance_log(d),
         sec_caveat(),
+        sec_survivorship(d) if not public else "",
+        sec_grid(d) if not public else "",
+        sec_feasibility(d) if not public else "",
         sec_method(),
     ])
     return page(title, body)
