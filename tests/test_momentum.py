@@ -75,6 +75,16 @@ def test_momentum_scores_insufficient_history_empty():
     assert momentum_scores(px, idx[-1], lookback=252, skip=21).empty
 
 
+def test_vol_adjust_prefers_lower_vol_same_trend():
+    idx = pd.bdate_range("2020-01-01", periods=300)
+    t = np.arange(300)
+    smooth = np.linspace(100.0, 150.0, 300)                        # same up-trend
+    jagged = np.linspace(100.0, 150.0, 300) + 8.0 * np.sin(t * 1.3)  # + oscillation = higher vol
+    px = pd.DataFrame({"SMOOTH": smooth, "JAGGED": jagged}, index=idx)
+    adj = momentum_scores(px, idx[-1], lookback=252, skip=21, vol_adjust=True)
+    assert adj["SMOOTH"] > adj["JAGGED"]                           # vol-adjust rewards the steady climber
+
+
 from tools.momentum import run_momentum
 
 
@@ -113,6 +123,21 @@ def test_run_momentum_no_history_returns_empty_schedule():
     px = pd.DataFrame({"A": np.linspace(100, 110, 100)}, index=idx)
     r = run_momentum(px, {"A": 10}, k=5, cost_mults=(1.0,))
     assert r["holdings_log"] == []
+
+
+def test_run_momentum_start_clips_first_rebalance_without_lookahead():
+    px = _multi()                                    # daily 2019-01 .. ~2020-07
+    slip = {t: 10 for t in px.columns}
+    full = run_momentum(px, slip, k=5, cost_mults=(1.0,))
+    clipped = run_momentum(px, slip, k=5, cost_mults=(1.0,), start="2020-03-01")
+
+    assert full["holdings_log"][0]["date"] < pd.Timestamp("2020-03-01")
+    assert clipped["holdings_log"]                                    # non-empty
+    assert clipped["holdings_log"][0]["date"] >= pd.Timestamp("2020-03-01")
+    # walk-forward: clipping the start changes nothing about the picks on shared dates
+    full_by_date = {h["date"]: h["picks"] for h in full["holdings_log"]}
+    for h in clipped["holdings_log"]:
+        assert h["picks"] == full_by_date[h["date"]]
 
 
 from tools.momentum import benchmark_curves, equal_weight_curve

@@ -25,11 +25,14 @@ def rebalance_dates(index, freq: str = "M") -> list[pd.Timestamp]:
 
 
 def momentum_scores(prices: pd.DataFrame, asof, lookback: int = 252,
-                    skip: int = 21) -> pd.Series:
+                    skip: int = 21, vol_adjust: bool = False) -> pd.Series:
     """12-1 momentum per ticker: price(asof-skip) / price(asof-lookback) - 1.
 
     Uses only rows with index <= asof (no look-ahead). Returns an empty Series
-    when there is not yet `lookback`+1 rows of history. inf/NaN dropped.
+    when there is not yet `lookback`+1 rows of history. inf/NaN dropped. When
+    `vol_adjust` (upgrade A), divide each raw score by the name's annualised daily
+    volatility over the lookback window — penalising choppy names, rewarding steady
+    climbers.
     """
     hist = prices.loc[:asof]
     if len(hist) < lookback + 1:
@@ -37,6 +40,10 @@ def momentum_scores(prices: pd.DataFrame, asof, lookback: int = 252,
     recent = hist.iloc[-(skip + 1)]              # ~skip days before asof
     base = hist.iloc[-(lookback + 1)]            # ~lookback days before asof
     scores = recent / base - 1.0
+    if vol_adjust:
+        rets = hist.iloc[-(lookback + 1):].pct_change().iloc[1:]
+        vol = rets.std() * np.sqrt(252)
+        scores = scores / vol.replace(0.0, np.nan)
     return scores.replace([np.inf, -np.inf], np.nan).dropna()
 
 
@@ -66,16 +73,20 @@ def run_momentum(prices: pd.DataFrame, slippage_bps: dict, *, k: int = 15,
                  lookback: int = 252, skip: int = 21, capital: float = 10_000.0,
                  cost_mults: tuple = (0.0, 1.0, 2.0), freq: str = "M",
                  liq_max: int = 30, fee_eur: float = 1.0,
-                 min_price: float = 1.0) -> dict:
+                 min_price: float = 1.0, start: str | None = None) -> dict:
     """Walk-forward momentum backtest.
 
     Returns {"runs": {mult: {equity, trades, stats}}, "holdings_log": [...],
              "start": iso}. The schedule (holdings_log) is cost-independent;
     each cost multiple compounds the same equal-weight daily returns minus a
-    rebalance cost drag.
+    rebalance cost drag. `start` clips the first rebalance to that date (scores
+    still use the full prior history, so no look-ahead is introduced).
     """
     dates = [d for d in rebalance_dates(prices.index, freq)
              if len(prices.loc[:d]) >= lookback + 1]
+    if start is not None:
+        cutoff = pd.Timestamp(start)
+        dates = [d for d in dates if d >= cutoff]
     holdings_log = []
     for i in range(len(dates) - 1):
         d = dates[i]
