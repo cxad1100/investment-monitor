@@ -42,6 +42,17 @@ def test_select_topk_sector_neutral_round_robin():
     assert select_topk(scores, elig, k=3) == ["A1", "A2", "A3"]   # plain = global top-3
 
 
+def test_trend_ok_above_below_200d_ma():
+    from tools.momentum import trend_ok
+    idx = pd.bdate_range("2019-01-01", periods=260)
+    up = pd.Series(np.linspace(100.0, 200.0, 260), index=idx)     # last > 200d mean
+    down = pd.Series(np.linspace(200.0, 100.0, 260), index=idx)   # last < 200d mean
+    assert trend_ok(up, idx[-1], ma=200) is True
+    assert trend_ok(down, idx[-1], ma=200) is False
+    short = up.iloc[:50]
+    assert trend_ok(short, short.index[-1], ma=200) is True       # too short → don't gate
+
+
 def test_rebalance_dates_monthly_count():
     idx = pd.bdate_range("2022-01-03", periods=400)   # ~19 months
     dates = rebalance_dates(idx, "M")

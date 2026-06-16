@@ -86,6 +86,15 @@ def select_topk(scores: pd.Series, eligible_set: set[str], k: int,
     return picks
 
 
+def trend_ok(benchmark: pd.Series, asof, ma: int = 200) -> bool:
+    """True when the benchmark closes at/above its `ma`-day moving average at asof
+    (risk-on). Too little history → True (don't gate). Upgrade C kill-switch."""
+    s = benchmark.loc[:asof].dropna()
+    if len(s) < ma:
+        return True
+    return float(s.iloc[-1]) >= float(s.iloc[-ma:].mean())
+
+
 def run_momentum(prices: pd.DataFrame, slippage_bps: dict, *, k: int = 15,
                  lookback: int = 252, skip: int = 21, capital: float = 10_000.0,
                  cost_mults: tuple = (0.0, 1.0, 2.0), freq: str = "M",
