@@ -99,7 +99,10 @@ def run_momentum(prices: pd.DataFrame, slippage_bps: dict, *, k: int = 15,
                  lookback: int = 252, skip: int = 21, capital: float = 10_000.0,
                  cost_mults: tuple = (0.0, 1.0, 2.0), freq: str = "M",
                  liq_max: int = 30, fee_eur: float = 1.0,
-                 min_price: float = 1.0, start: str | None = None) -> dict:
+                 min_price: float = 1.0, start: str | None = None,
+                 vol_adjust: bool = False, sectors: dict | None = None,
+                 sector_neutral: bool = False, benchmark=None,
+                 trend_filter: bool = False, lazy: bool = False, pit=None) -> dict:
     """Walk-forward momentum backtest.
 
     Returns {"runs": {mult: {equity, trades, stats}}, "holdings_log": [...],
@@ -107,6 +110,12 @@ def run_momentum(prices: pd.DataFrame, slippage_bps: dict, *, k: int = 15,
     each cost multiple compounds the same equal-weight daily returns minus a
     rebalance cost drag. `start` clips the first rebalance to that date (scores
     still use the full prior history, so no look-ahead is introduced).
+
+    Upgrade toggles (all default off → the baseline): `vol_adjust` (A),
+    `sector_neutral` + `sectors` (B), `trend_filter` + `benchmark` (C), `lazy` (F).
+    A `pit` (PITUniverse) activates point-in-time eligibility (already-dead names are
+    never picked) and the graveyard — a name dying mid-hold is forward-filled to its
+    last traded price (liquidated to cash) so the backtest eats the real loss.
     """
     dates = [d for d in rebalance_dates(prices.index, freq)
              if len(prices.loc[:d]) >= lookback + 1]
@@ -116,9 +125,15 @@ def run_momentum(prices: pd.DataFrame, slippage_bps: dict, *, k: int = 15,
     holdings_log = []
     for i in range(len(dates) - 1):
         d = dates[i]
-        scores = momentum_scores(prices, d, lookback, skip)
+        scores = momentum_scores(prices, d, lookback, skip, vol_adjust=vol_adjust)
         elig = eligible(prices, d, slippage_bps, liq_max, lookback + skip, min_price)
-        picks = select_topk(scores, elig, k)
+        if pit is not None:
+            elig = {t for t in elig if pit.listed(t, d)}      # drop already-dead names
+        if trend_filter and benchmark is not None and not trend_ok(benchmark, d):
+            picks = []                                         # kill-switch → cash
+        else:
+            picks = select_topk(scores, elig, k,
+                                 sectors=sectors if sector_neutral else None)
         holdings_log.append(dict(date=d, next=dates[i + 1], picks=picks,
                                  scores={t: float(scores[t]) for t in picks}))
 
@@ -142,12 +157,18 @@ def run_momentum(prices: pd.DataFrame, slippage_bps: dict, *, k: int = 15,
             cost = sum(fee_eur + slippage_bps[t] / 1e4 * w
                        for t in traded) * mult
             equity_val -= cost
-            seg = prices.loc[d:nxt, picks]
-            rets = seg.pct_change().iloc[1:].fillna(0.0)
-            port_ret = rets.mean(axis=1)                # equal-weight daily return
-            for day, r in port_ret.items():
-                equity_val *= (1.0 + r)
-                eq_points.append((day, equity_val))
+            seg = prices.loc[d:nxt, picks].ffill()      # dead leg held at last price (cash)
+            if lazy:                                     # weights drift, no daily re-equal-weight
+                basket = (seg / seg.iloc[0]).mean(axis=1)
+                for day in seg.index[1:]:
+                    eq_points.append((day, equity_val * float(basket[day])))
+                equity_val = equity_val * float(basket.iloc[-1])
+            else:
+                rets = seg.pct_change().iloc[1:].fillna(0.0)
+                port_ret = rets.mean(axis=1)            # equal-weight daily return
+                for day, r in port_ret.items():
+                    equity_val *= (1.0 + r)
+                    eq_points.append((day, equity_val))
             for t in picks:
                 name_ret = float(seg[t].iloc[-1] / seg[t].iloc[0] - 1.0)
                 c = (fee_eur + slippage_bps[t] / 1e4 * w) * mult \

@@ -160,6 +160,23 @@ def test_run_momentum_start_clips_first_rebalance_without_lookahead():
         assert h["picks"] == full_by_date[h["date"]]
 
 
+def test_run_momentum_graveyard_liquidates_dead_holding():
+    from tools.universe_pit import PITUniverse
+    idx = pd.bdate_range("2019-01-01", periods=400)
+    winner = 100.0 * np.cumprod(1 + np.full(400, 0.001))
+    bomb = np.concatenate([np.linspace(100, 300, 300), np.linspace(300, 30, 60),
+                           [np.nan] * 40])
+    px = pd.DataFrame({"WIN": winner, "BOMB": bomb,
+                       "C": np.linspace(100, 90, 400)}, index=idx)
+    slip = {t: 10 for t in px.columns}
+    pit = PITUniverse(px, delisting={"BOMB": idx[359]})           # dies at bar 359
+    r = run_momentum(px, slip, k=2, lookback=200, skip=10, cost_mults=(0.0,), pit=pit)
+    for h in r["holdings_log"]:
+        if h["date"] > idx[359]:
+            assert "BOMB" not in h["picks"]                       # dead → never picked after death
+    assert r["runs"][0.0]["equity"].notna().all()                # no NaN from the dead leg
+
+
 from tools.momentum import benchmark_curves, equal_weight_curve
 
 
