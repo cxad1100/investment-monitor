@@ -13,3 +13,4 @@ data/pairs_prices.csv
 data/momentum_prices.csv
 data/momentum_prices_raw.csv
 data/momentum_dead_prices.csv
+data/dead_prices/
