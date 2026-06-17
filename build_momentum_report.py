@@ -11,6 +11,7 @@ caveat stays.
 """
 
 import argparse
+import re
 import webbrowser
 from datetime import datetime
 from pathlib import Path
@@ -67,6 +68,12 @@ def _disp(meta: dict, t: str) -> str:
     German shadow that keys the row."""
     m = meta.get(t, {})
     return str(m.get("home") or t).split(".")[0]
+
+
+def _name(m: dict, t: str) -> str:
+    """Clean display name — EODHD's German listing name often trails the German
+    ticker in parens ('AXT  (AHV.SG)'); strip that, keep real parentheticals."""
+    return re.sub(r"\s*\([A-Z0-9][A-Z0-9.]*\)\s*$", "", str(m.get("name", t))).strip() or t
 
 
 # ── Data assembly ─────────────────────────────────────────────────────────────
@@ -153,7 +160,7 @@ def sec_holdings(d: dict) -> str:
         isin = m.get("isin") if pd.notna(m.get("isin")) else ""
         rows.append(
             f"<tr><td class='mono'>{home}</td>"
-            f"<td>{m.get('name', t)}</td>"
+            f"<td>{_name(m, t)}</td>"
             f"<td class='dim mono' style='font-size:0.72rem'>{isin}</td>"
             f"<td>{m.get('country','—')}</td>"
             f"<td class='num mono'>{cur['scores'].get(t, float('nan')) * 100:+.1f}%</td>"
