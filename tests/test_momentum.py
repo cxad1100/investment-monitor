@@ -187,6 +187,18 @@ def test_run_momentum_graveyard_liquidates_dead_holding():
     assert all(t in h0["ret"] for t in h0["picks"])              # every pick has a period return
 
 
+def test_run_momentum_elig_cache_matches_uncached():
+    from tools.momentum import precompute_eligibility
+    px = _multi()
+    slip = {t: 10 for t in px.columns}
+    dates = [d for d in rebalance_dates(px.index, "M") if len(px.loc[:d]) >= 201]
+    cache = precompute_eligibility(px, slip, dates, min_obs=210)
+    a = run_momentum(px, slip, k=5, lookback=200, skip=10, cost_mults=(1.0,))
+    b = run_momentum(px, slip, k=5, lookback=200, skip=10, cost_mults=(1.0,),
+                     elig_by_date=cache)
+    assert [h["picks"] for h in a["holdings_log"]] == [h["picks"] for h in b["holdings_log"]]
+
+
 from tools.momentum import benchmark_curves, equal_weight_curve
 
 

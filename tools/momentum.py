@@ -64,6 +64,20 @@ def eligible(prices: pd.DataFrame, asof, slippage_bps: dict,
     return out
 
 
+def precompute_eligibility(prices: pd.DataFrame, slippage_bps: dict, dates, *,
+                           liq_max: int = 30, min_obs: int = 273,
+                           min_price: float = 1.0, pit=None) -> dict:
+    """{date: eligible ∩ listed} per date — config-independent, so the grid computes
+    it once and shares it across all 64 configs (otherwise the dominant cost)."""
+    out = {}
+    for d in dates:
+        e = eligible(prices, d, slippage_bps, liq_max, min_obs, min_price)
+        if pit is not None:
+            e = {t for t in e if pit.listed(t, d)}
+        out[d] = e
+    return out
+
+
 def select_topk(scores: pd.Series, eligible_set: set[str], k: int,
                 sectors: dict | None = None) -> list[str]:
     """Top-k tickers by score, restricted to the eligible set, highest first. When
@@ -103,7 +117,8 @@ def run_momentum(prices: pd.DataFrame, slippage_bps: dict, *, k: int = 15,
                  min_price: float = 1.0, start: str | None = None,
                  vol_adjust: bool = False, sectors: dict | None = None,
                  sector_neutral: bool = False, benchmark=None,
-                 trend_filter: bool = False, lazy: bool = False, pit=None) -> dict:
+                 trend_filter: bool = False, lazy: bool = False, pit=None,
+                 elig_by_date: dict | None = None) -> dict:
     """Walk-forward momentum backtest.
 
     Returns {"runs": {mult: {equity, trades, stats}}, "holdings_log": [...],
@@ -127,16 +142,19 @@ def run_momentum(prices: pd.DataFrame, slippage_bps: dict, *, k: int = 15,
     for i in range(len(dates) - 1):
         d = dates[i]
         scores = momentum_scores(prices, d, lookback, skip, vol_adjust=vol_adjust)
-        elig = eligible(prices, d, slippage_bps, liq_max, lookback + skip, min_price)
-        if pit is not None:
-            elig = {t for t in elig if pit.listed(t, d)}      # drop already-dead names
+        if elig_by_date is not None:                          # precomputed (grid: shared across configs)
+            elig = elig_by_date.get(d, set())
+        else:
+            elig = eligible(prices, d, slippage_bps, liq_max, lookback + skip, min_price)
+            if pit is not None:
+                elig = {t for t in elig if pit.listed(t, d)}  # drop already-dead names
         if trend_filter and benchmark is not None and not trend_ok(benchmark, d):
             picks = []                                         # kill-switch → cash
         else:
             picks = select_topk(scores, elig, k,
                                  sectors=sectors if sector_neutral else None)
-        dead = {t for t in picks
-                if pit is not None and t in pit.died_between(d, dates[i + 1])}
+        died = pit.died_between(d, dates[i + 1]) if pit is not None else set()
+        dead = {t for t in picks if t in died}
         holdings_log.append(dict(date=d, next=dates[i + 1], picks=picks,
                                  scores={t: float(scores[t]) for t in picks},
                                  ret={}, dead=dead))
