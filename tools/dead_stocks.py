@@ -65,7 +65,7 @@ OUT_PRICES = ROOT / "data" / "momentum_dead_prices.csv"
 
 
 def build_dead_table(seed: list[dict], *, fetch_history, today=None,
-                     min_price_alive: float = 1.0):
+                     min_price_alive: float = 1.0, max_survival_ratio: float = 1.0):
     """Seed/removal candidates → (dead-meta DataFrame, dead-prices DataFrame).
 
     `fetch_history(ticker) -> pd.Series` is injected (EODHD live, fake in tests).
@@ -87,11 +87,14 @@ def build_dead_table(seed: list[dict], *, fetch_history, today=None,
             continue                                       # still trading → not dead
         s = s.loc[:dl].dropna()                            # truncate at death
         peak = float(s.max())
+        last = float(s.iloc[-1])
         if peak < min_price_alive:                         # perpetual penny — never a real holding
+            continue
+        if last > max_survival_ratio * peak:               # fair-value withdrawal/buyout, not a death
             continue
         rows.append({"ticker": c["ticker"], "name": c.get("name", c["ticker"]),
                      "sector": c.get("sector", "Unknown"), "delisting_date": dl,
-                     "last_price": float(s.iloc[-1]), "peak_price": peak,
+                     "last_price": last, "peak_price": peak,
                      "spread_pct": float(c.get("spread_pct", 0.5))})
         cols[c["ticker"]] = s
     meta = pd.DataFrame(rows, columns=["ticker", "name", "sector", "delisting_date",

@@ -66,3 +66,17 @@ def test_build_dead_table_from_seed_classifies_and_filters():
     # dead column is truncated at delisting (no data after)
     dl = pd.Timestamp(table.iloc[0]["delisting_date"])
     assert prices["WDI.DE"].dropna().index[-1] == dl
+
+
+def test_build_dead_table_collapse_filter_excludes_withdrawals():
+    idx = pd.bdate_range("2019-01-01", periods=300)
+
+    def fh(t):
+        if t == "COLLAPSE":
+            return pd.Series(list(np.linspace(100, 5, 200)) + [np.nan] * 100, index=idx)
+        return pd.Series(list(np.linspace(100, 90, 200)) + [np.nan] * 100, index=idx)  # withdrawal
+
+    seed = [{"ticker": "COLLAPSE", "removal_date": "2019-06-01"},
+            {"ticker": "WITHDRAW", "removal_date": "2019-06-01"}]
+    table, _ = build_dead_table(seed, fetch_history=fh, today=idx[-1], max_survival_ratio=0.5)
+    assert list(table["ticker"]) == ["COLLAPSE"]    # withdrawal last/peak=0.9 > 0.5 → excluded
