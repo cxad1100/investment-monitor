@@ -24,7 +24,7 @@ from tools.portfolio_tools import BENCHMARKS
 from tools.data_buffer import cached_price_history
 from build_momentum_report import (
     PRICES_CSV, META_CSV, ROOT, LOOKBACK, SKIP, START, LIQ_MAX, MIN_PRICE, CAPITAL,
-    FEE_EUR, COST_MULTS, TRAIN_END, VAL_END, WINSOR_CAP, EXEC_LAG, MIN_TURNOVER,
+    FEE_EUR, COST_MULTS, TRAIN_END, VAL_END, WINSOR_CAP, EXEC_LAG, MIN_TURNOVER, MAX_TURNOVER,
     _slip, _broker, _disp, _pnl_color, sec_holdings, sec_curve,
     sec_grid, sec_feasibility, sec_timelines, sec_survivorship, sec_method,
 )
@@ -59,8 +59,9 @@ def gather(force: bool = False, refresh: bool | None = None) -> dict:
     prices = pd.read_csv(PRICES_CSV, index_col=0, parse_dates=True)
     prices = winsorize_prices(prices, cap=WINSOR_CAP)          # de-glitch the raw feed
     meta_df = pd.read_csv(META_CSV)
-    if "med_turnover" in meta_df.columns:                      # liquidity floor (drops dead .F feeds)
-        liquid = (meta_df["med_turnover"] >= MIN_TURNOVER) | meta_df["delisting_date"].notna()
+    if "med_turnover" in meta_df.columns:                      # liquidity band (drops dead .F feeds + glitch turnover)
+        tn = meta_df["med_turnover"]
+        liquid = ((tn >= MIN_TURNOVER) & (tn <= MAX_TURNOVER)) | meta_df["delisting_date"].notna()
         meta_df = meta_df[liquid].reset_index(drop=True)
         prices = prices[[c for c in prices.columns if c in set(meta_df["ticker"])]]
     meta = {r["ticker"]: dict(r) for _, r in meta_df.iterrows()}

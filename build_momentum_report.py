@@ -42,6 +42,7 @@ MIN_PRICE    = 1.0        # drop sub-€1 penny listings (12-1 momentum = tick n
 MIN_TURNOVER = 100_000    # €/day median turnover floor — drops thin/ghost listings whose
                           #   German-exchange feed is stale/broken (Aker BP ARC.F €0/day,
                           #   Seagate 847.F €893/day) and only the real prices survive
+MAX_TURNOVER = 50_000_000_000   # €/day ceiling — no real stock clears €50B/day; above = glitch
 WINSOR_CAP   = 0.5        # clip daily returns ±50% — kills split-adjustment glitches
 EXEC_LAG     = 1          # trade t+1 (next bar after the signal), not the signal-day close
 CAPITAL      = 10_000.0   # paper account, EUR
@@ -91,8 +92,9 @@ def gather(force: bool = False, refresh: bool | None = None, with_grid: bool = T
     prices = pd.read_csv(PRICES_CSV, index_col=0, parse_dates=True)
     prices = winsorize_prices(prices, cap=WINSOR_CAP)          # de-glitch the raw feed
     meta_df = pd.read_csv(META_CSV)
-    if "med_turnover" in meta_df.columns:                      # liquidity floor (drops dead .F feeds)
-        liquid = (meta_df["med_turnover"] >= MIN_TURNOVER) | meta_df["delisting_date"].notna()
+    if "med_turnover" in meta_df.columns:                      # liquidity band (drops dead .F feeds + glitch turnover)
+        tn = meta_df["med_turnover"]
+        liquid = ((tn >= MIN_TURNOVER) & (tn <= MAX_TURNOVER)) | meta_df["delisting_date"].notna()
         meta_df = meta_df[liquid].reset_index(drop=True)
         prices = prices[[c for c in prices.columns if c in set(meta_df["ticker"])]]
     meta = {r["ticker"]: dict(r) for _, r in meta_df.iterrows()}

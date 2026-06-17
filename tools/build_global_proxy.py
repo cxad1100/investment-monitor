@@ -21,7 +21,9 @@ from tools.pairs_universe import _load_universe
 from tools.synthetic_proxy import to_eur, median_turnover_eur
 
 ROOT = eodhd.ROOT
-FLOOR = 100_000.0          # €/day median turnover
+FLOOR = 100_000.0          # €/day median turnover (lower guardrail — drop illiquid)
+CEIL = 50_000_000_000.0    # €/day upper guardrail — no real single stock clears €50B/day
+                           #   (NVIDIA ~€28B); anything above is a price/volume glitch (AMMN)
 
 # ISIN country prefix -> (EODHD home exchange, home currency, prices_in_pence)
 COUNTRY_EXCH = {
@@ -137,8 +139,8 @@ def main():
         if len(eur) < 300 or float(eur.tail(60).median()) < PRICE_FLOOR:
             return None                                  # too short, or sub-€1 penny
         med = median_turnover_eur(vol, eur)
-        if med < FLOOR:
-            return None                                  # illiquid
+        if not (FLOOR <= med <= CEIL):
+            return None                                  # illiquid, or glitch-inflated turnover
         return ger, eur, dict(ticker=ger, name=name, sector="Unknown",
                               country=ISIN_CC.get(isin[:2], "—"), currency="EUR",
                               slippage_bps=25, local_id="", delisting_date="",
