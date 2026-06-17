@@ -68,9 +68,10 @@ def gather(force: bool = False, refresh: bool | None = None) -> dict:
     slip = {t: _slip(m) for t, m in meta.items() if t in prices.columns}
     pit = PITUniverse(prices, delisting_map(meta_df))
 
-    bench_tickers = [tk for _, (tk, _) in BENCHMARKS.items()]
+    benches = {n: v for n, v in BENCHMARKS.items() if n != "Bitcoin"}   # equities/bonds only
+    bench_tickers = [tk for tk, _ in benches.values()]
     bench_raw = cached_price_history(bench_tickers, period="9y", force=refresh)
-    bench = bench_raw.rename(columns={tk: name for name, (tk, _) in BENCHMARKS.items()})
+    bench = bench_raw.rename(columns={tk: name for name, (tk, _) in benches.items()})
     spx = bench["S&P 500"] if "S&P 500" in bench.columns else bench.iloc[:, 0]
 
     res = run_momentum(prices, slip, lookback=LOOKBACK, skip=SKIP, capital=CAPITAL,
