@@ -120,7 +120,9 @@ def sec_timeline(d: dict) -> str:
             f"<span style='color:{_pnl_color(h['ret'].get(t, 0.0), t in dead)}' "
             f"title='{t} {h['ret'].get(t, 0.0):+.0%}'>{t}</span>" for t in h["picks"])
         spans = spans or "<span class='dim'>cash</span>"
-        lines.append(f"<div><span class='mono dim'>{h['date'].date()}</span> {spans}</div>")
+        mret = sum(h["ret"].values()) / len(h["ret"]) if h["ret"] else 0.0
+        lines.append(f"<div><span class='mono dim'>{h['date'].date()}</span> "
+                     f"<b style='color:{_pnl_color(mret, False)}'>{mret:+.1%}</b> {spans}</div>")
     return ("<h2>Every rebalance, colored by outcome</h2>"
             "<p class='dim'>Each line is one rebalance’s picks, colored by that holding "
             "period’s return — <span style='color:#0a6b00'>■</span> ≥+20% · "

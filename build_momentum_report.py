@@ -348,7 +348,9 @@ def sec_timelines(d: dict) -> str:
                 f"<span style='color:{_pnl_color(r, t in dead)}' title='{t} {r:+.0%}'>{t}</span>"
                 for t, r in row["ret"].items())
             spans = spans or "<span class='dim'>cash</span>"
-            lines.append(f"<div><span class='mono dim'>{row['date']}</span> {spans}</div>")
+            mret = sum(row["ret"].values()) / len(row["ret"]) if row["ret"] else 0.0
+            lines.append(f"<div><span class='mono dim'>{row['date']}</span> "
+                         f"<b style='color:{_pnl_color(mret, False)}'>{mret:+.1%}</b> {spans}</div>")
         blocks.append(
             f"<details><summary>{c['code']} · val Sharpe {c['val']['sharpe']:.2f} · "
             f"{c['trades_per_year']:.0f} tr/yr</summary>"
