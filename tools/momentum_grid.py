@@ -98,3 +98,21 @@ def feasibility(cell: dict, *, capital: float = 10_000.0, fee_eur: float = 1.0) 
     drag_pct = annual_fee / capital * 100.0
     return dict(annual_fee_eur=annual_fee, fee_drag_pct=drag_pct,
                 pays_for_itself=cell["full"]["net_return"] * 100.0 > drag_pct)
+
+
+def pick_ultimate(grid: dict, *, capital: float = 10_000.0, fee_eur: float = 1.0):
+    """The 'ultimate' config: among configs that pay for themselves and are positive
+    in BOTH train and validation, the one maximising min(train_Sharpe, val_Sharpe) —
+    worst-case robustness, so a val-lucky or train-overfit cell can't win. None if
+    nothing qualifies. Turnover (fewer trades) breaks ties."""
+    cands = []
+    for c in grid["cells"]:
+        if not feasibility(c, capital=capital, fee_eur=fee_eur)["pays_for_itself"]:
+            continue
+        if c["train"]["net_return"] <= 0 or c["val"]["net_return"] <= 0:
+            continue
+        robust = min(c["train"]["sharpe"], c["val"]["sharpe"])
+        cands.append((robust, -c["trades_per_year"], c))
+    if not cands:
+        return None
+    return max(cands, key=lambda x: (x[0], x[1]))[2]

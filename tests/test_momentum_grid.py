@@ -53,3 +53,19 @@ def test_feasibility_fee_drag_arithmetic():
     assert abs(f["annual_fee_eur"] - 40.0) < 1e-9          # 40 trades × €1
     assert abs(f["fee_drag_pct"] - 0.40) < 1e-9            # €40 / €10k = 0.40%
     assert f["pays_for_itself"] is True                    # net 50% >> drag
+
+
+from tools.momentum_grid import pick_ultimate
+
+
+def test_pick_ultimate_rewards_worst_case_robustness():
+    cells = [
+        {"code": "······", "train": {"sharpe": 1.0, "net_return": 2.0},
+         "val": {"sharpe": 1.5, "net_return": 5.0}, "trades_per_year": 40, "full": {"net_return": 5.0}},
+        {"code": "·B····", "train": {"sharpe": 1.2, "net_return": 1.3},
+         "val": {"sharpe": 2.2, "net_return": 5.0}, "trades_per_year": 50, "full": {"net_return": 5.0}},
+        {"code": "A·····", "train": {"sharpe": 0.2, "net_return": 4.0},   # val-lucky, weak train
+         "val": {"sharpe": 3.0, "net_return": 4.0}, "trades_per_year": 50, "full": {"net_return": 4.0}},
+    ]
+    u = pick_ultimate({"cells": cells})
+    assert u["code"] == "·B····"            # min(train,val)=1.2 beats baseline 1.0 and A's 0.2
