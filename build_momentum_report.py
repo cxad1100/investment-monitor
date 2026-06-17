@@ -132,7 +132,7 @@ def sec_holdings(d: dict) -> str:
     cur = log[-1]
     picks = cur["picks"]
     out = ["<h2>Current top picks</h2>"]
-    out.append(f"<p class='dim'>Equal-weight top-{K} as of {cur['date'].date()}, "
+    out.append(f"<p class='dim'>Equal-weight top-{len(picks)} as of {cur['date'].date()}, "
                "ranked by 12-1 momentum score. Each leg shows its broker WKN · name "
                "so you can find and trade it in the app.</p>")
     if not picks:

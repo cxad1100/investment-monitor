@@ -36,13 +36,12 @@ PAGES = {
     "scenarios": dict(loader="/scenarios", build="/scenarios-report", snap=S.ROOT / "local/scenarios.html"),
 }
 
-# cross-page nav links shown in the top bar, in display order
+# cross-page nav links shown in the top bar, in display order.
+# Pairs / Momentum-lab / Scenarios routes still exist (PAGES below) but are
+# unlinked — the live site is just Portfolio + the chosen Strategy.
 _NAV = [
     ("main",     "/",         "Portfolio"),
-    ("pairs",    "/pairs",    "Pairs Lab"),
-    ("momentum", "/momentum", "Momentum"),
     ("strategy", "/strategy", "Strategy"),
-    ("scenarios", "/scenarios", "Scenarios"),
 ]
 
 

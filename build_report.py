@@ -664,7 +664,7 @@ def build(d: dict, public: bool) -> str:
              if public else '<span class="dim">private build — full data</span>')
     body = "".join([
         f"<h1>{title}</h1><p class='dim'>generated {now} · {badge} · "
-        f"<a href='pairs.html'>Pairs Trading Lab →</a></p>",
+        f"<a href='strategy.html'>Momentum Strategy →</a></p>",
         sec_summary(d, public),
         sec_positions(d, public),
         sec_roi(d),
