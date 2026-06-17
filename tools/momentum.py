@@ -78,6 +78,16 @@ def precompute_eligibility(prices: pd.DataFrame, slippage_bps: dict, dates, *,
     return out
 
 
+def precompute_scores(prices: pd.DataFrame, dates, lookback: int = 252,
+                      skip: int = 21) -> dict:
+    """{date: {"raw": Series, "voladj": Series}} per date — scores are config-
+    independent (only the A toggle picks the variant), so the grid computes the
+    expensive vol-adjusted scores once per date and shares them across configs."""
+    return {d: {"raw": momentum_scores(prices, d, lookback, skip),
+                "voladj": momentum_scores(prices, d, lookback, skip, vol_adjust=True)}
+            for d in dates}
+
+
 def select_topk(scores: pd.Series, eligible_set: set[str], k: int,
                 sectors: dict | None = None) -> list[str]:
     """Top-k tickers by score, restricted to the eligible set, highest first. When
@@ -118,7 +128,8 @@ def run_momentum(prices: pd.DataFrame, slippage_bps: dict, *, k: int = 15,
                  vol_adjust: bool = False, sectors: dict | None = None,
                  sector_neutral: bool = False, benchmark=None,
                  trend_filter: bool = False, lazy: bool = False, pit=None,
-                 elig_by_date: dict | None = None) -> dict:
+                 elig_by_date: dict | None = None,
+                 score_by_date: dict | None = None) -> dict:
     """Walk-forward momentum backtest.
 
     Returns {"runs": {mult: {equity, trades, stats}}, "holdings_log": [...],
@@ -141,7 +152,11 @@ def run_momentum(prices: pd.DataFrame, slippage_bps: dict, *, k: int = 15,
     holdings_log = []
     for i in range(len(dates) - 1):
         d = dates[i]
-        scores = momentum_scores(prices, d, lookback, skip, vol_adjust=vol_adjust)
+        if score_by_date is not None and d in score_by_date:  # precomputed (grid: shared across configs)
+            sc = score_by_date[d]
+            scores = sc["voladj"] if vol_adjust else sc["raw"]
+        else:
+            scores = momentum_scores(prices, d, lookback, skip, vol_adjust=vol_adjust)
         if elig_by_date is not None:                          # precomputed (grid: shared across configs)
             elig = elig_by_date.get(d, set())
         else:

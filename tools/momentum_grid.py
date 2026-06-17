@@ -8,7 +8,8 @@ from itertools import product
 
 import pandas as pd
 
-from tools.momentum import run_momentum, precompute_eligibility, rebalance_dates
+from tools.momentum import (run_momentum, precompute_eligibility, precompute_scores,
+                            rebalance_dates)
 from tools.pairs_backtest import backtest_stats
 
 
@@ -69,12 +70,13 @@ def run_grid(prices, slippage_bps, *, sectors=None, benchmark=None, pit=None,
                   if len(prices.loc[:d]) >= lookback + 1 and d >= cutoff]
     elig_by_date = precompute_eligibility(prices, slippage_bps, cand_dates,
                                           min_obs=lookback + skip, pit=pit)
+    score_by_date = precompute_scores(prices, cand_dates, lookback, skip)
     cells = []
     for cfg in configs:
         r = run_momentum(prices, slippage_bps, capital=capital, cost_mults=(1.0,),
                          lookback=lookback, skip=skip, start=start, sectors=sectors,
                          benchmark=benchmark, pit=pit, elig_by_date=elig_by_date,
-                         **cfg.kwargs())
+                         score_by_date=score_by_date, **cfg.kwargs())
         eq = r["runs"][1.0]["equity"]
         tr = r["runs"][1.0]["trades"]
         years = max((eq.index[-1] - eq.index[0]).days / 365.25, 1e-9) if len(eq) else 1.0

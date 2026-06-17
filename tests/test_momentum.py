@@ -199,6 +199,18 @@ def test_run_momentum_elig_cache_matches_uncached():
     assert [h["picks"] for h in a["holdings_log"]] == [h["picks"] for h in b["holdings_log"]]
 
 
+def test_run_momentum_score_cache_matches_uncached():
+    from tools.momentum import precompute_scores
+    px = _multi()
+    slip = {t: 10 for t in px.columns}
+    dates = [d for d in rebalance_dates(px.index, "M") if len(px.loc[:d]) >= 201]
+    sc = precompute_scores(px, dates, 200, 10)
+    a = run_momentum(px, slip, k=5, lookback=200, skip=10, cost_mults=(1.0,), vol_adjust=True)
+    b = run_momentum(px, slip, k=5, lookback=200, skip=10, cost_mults=(1.0,),
+                     vol_adjust=True, score_by_date=sc)
+    assert [h["picks"] for h in a["holdings_log"]] == [h["picks"] for h in b["holdings_log"]]
+
+
 from tools.momentum import benchmark_curves, equal_weight_curve
 
 
