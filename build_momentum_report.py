@@ -20,7 +20,7 @@ import plotly.graph_objects as go
 
 from tools import theme
 from tools.report_html import fig_html, pct as _pct, card as _card, page
-from tools.momentum import run_momentum, benchmark_curves, equal_weight_curve
+from tools.momentum import run_momentum, benchmark_curves, equal_weight_curve, winsorize_prices
 from tools.pairs_universe import UNIVERSE, fetch_prices
 from tools.portfolio_tools import BENCHMARKS
 from tools.data_buffer import cached_price_history
@@ -34,9 +34,12 @@ LOOKBACK     = 252
 SKIP         = 21
 REBAL        = "M"
 START        = "2018-01-01"   # first rebalance (MiFID era); full 9y survivorship-corrected window
-TRAIN_END    = "2022-12-31"   # train ≤ this (in-sample); validation after (out-of-sample)
+TRAIN_END    = "2021-12-31"   # train ≤ this (in-sample, used to choose the config)
+VAL_END      = "2023-12-31"   # validation = train_end→here; test = after (never informs the pick)
 LIQ_MAX      = 30
 MIN_PRICE    = 1.0        # drop sub-€1 penny listings (12-1 momentum = tick noise there)
+WINSOR_CAP   = 0.5        # clip daily returns ±50% — kills split-adjustment glitches
+EXEC_LAG     = 1          # trade t+1 (next bar after the signal), not the signal-day close
 CAPITAL      = 10_000.0   # paper account, EUR
 FEE_EUR      = 1.0        # Trade Republic per-order fee
 COST_MULTS   = (0.0, 1.0, 2.0)
@@ -69,6 +72,7 @@ def gather(force: bool = False, refresh: bool | None = None, with_grid: bool = T
     matrix. `force`/`refresh` only re-fetch the benchmark series."""
     refresh = force if refresh is None else refresh
     prices = pd.read_csv(PRICES_CSV, index_col=0, parse_dates=True)
+    prices = winsorize_prices(prices, cap=WINSOR_CAP)          # de-glitch the raw feed
     meta_df = pd.read_csv(META_CSV)
     meta = {r["ticker"]: dict(r) for _, r in meta_df.iterrows()}
     sectors = {t: (str(m["sector"]) if pd.notna(m.get("sector")) else "Unknown")
@@ -83,9 +87,10 @@ def gather(force: bool = False, refresh: bool | None = None, with_grid: bool = T
 
     res = run_momentum(prices, slip, k=K, lookback=LOOKBACK, skip=SKIP, capital=CAPITAL,
                        cost_mults=COST_MULTS, freq=REBAL, liq_max=LIQ_MAX, fee_eur=FEE_EUR,
-                       min_price=MIN_PRICE, start=START, pit=pit)
+                       min_price=MIN_PRICE, start=START, pit=pit, execute_lag=EXEC_LAG)
     grid = (run_grid(prices, slip, sectors=sectors, benchmark=spx, pit=pit, start=START,
-                     train_end=TRAIN_END, capital=CAPITAL, lookback=LOOKBACK, skip=SKIP)
+                     train_end=TRAIN_END, val_end=VAL_END, capital=CAPITAL,
+                     lookback=LOOKBACK, skip=SKIP, execute_lag=EXEC_LAG)
             if with_grid else None)
 
     return dict(prices=prices, res=res, benchmarks=bench, capital=CAPITAL, meta=meta,
@@ -293,22 +298,28 @@ def sec_grid(d: dict) -> str:
     g = d.get("grid")
     if not g:
         return ""
+    has_test = any("test" in c for c in g["cells"])
     rows = []
     for c in sorted(g["cells"], key=lambda c: c["val"]["sharpe"], reverse=True):
+        test_cells = (f"<td class='num'>{_pct(c['test']['net_return'] * 100)}</td>"
+                      f"<td class='num mono'>{c['test']['sharpe']:.2f}</td>") if has_test else ""
         rows.append(
             f"<tr><td class='mono'>{c['code']}</td>"
             f"<td class='num'>{_pct(c['train']['net_return'] * 100)}</td>"
             f"<td class='num mono'>{c['train']['sharpe']:.2f}</td>"
             f"<td class='num'>{_pct(c['val']['net_return'] * 100)}</td>"
             f"<td class='num mono'>{c['val']['sharpe']:.2f}</td>"
+            f"{test_cells}"
             f"<td class='num mono'>{c['trades_per_year']:.0f}</td></tr>")
+    test_hdr = "<th class='num'>Test ret</th><th class='num'>Test Sh</th>" if has_test else ""
     return ("<h2>64-permutation grid (A·B·C·D·E·F)</h2>"
             "<p class='dim'>A vol-adj · B sector-neutral · C trend-filter · D 10-slot · "
-            "E quarterly · F lazy. Ranked by <b>validation</b> Sharpe (out-of-sample); "
-            "train = 2018–2022, validation = 2023→. Pick a config that holds up in BOTH "
-            "columns, not the best train cell.</p>"
+            "E quarterly · F lazy. Ranked by <b>validation</b> Sharpe; train = 2018–21 "
+            "(picks the config), validation = 2022–23, <b>test = 2024→ (held out, never "
+            "informs the pick)</b>. A config you'd trust holds up across all three — "
+            "especially test.</p>"
             "<table><tr><th>Cfg</th><th class='num'>Train ret</th><th class='num'>Train Sh</th>"
-            "<th class='num'>Val ret</th><th class='num'>Val Sh</th>"
+            "<th class='num'>Val ret</th><th class='num'>Val Sh</th>" + test_hdr +
             "<th class='num'>Trades/yr</th></tr>" + "".join(rows) + "</table>")
 
 

@@ -52,17 +52,20 @@ def _stats_slice(equity: pd.Series, trades: list, lo, hi, capital: float) -> dic
 
 
 def run_grid(prices, slippage_bps, *, sectors=None, benchmark=None, pit=None,
-             configs=None, start="2018-01-01", train_end="2022-12-31",
-             capital=10_000.0, lookback=252, skip=21) -> dict:
+             configs=None, start="2018-01-01", train_end="2022-12-31", val_end=None,
+             capital=10_000.0, lookback=252, skip=21, execute_lag=0) -> dict:
     """Run each config walk-forward over [start, end]; partition each equity curve +
-    trades into train (≤ train_end), validation (> train_end) and the full window.
+    trades into train (≤ train_end), validation (train_end < t ≤ val_end) and — when
+    `val_end` is given — a held-out test (> val_end). `test` is the honest check: the
+    config is *chosen* on validation, so val is no longer untouched; test never informs
+    the pick. Without `val_end`, validation runs to the end (two-way split, back-compat).
 
-    Returns {"cells": [{code, config, train, val, full, trades_per_year}], train_end}.
-    One run per config — the picks already use only past data, so the val slice is
-    genuine out-of-sample. Rank by validation Sharpe, not train, to dodge overfit.
+    Returns {"cells": [{code, config, train, val, [test], full, trades_per_year}], ...}.
+    One run per config — picks use only past data, so the slices are genuine OOS.
     """
     configs = configs or ALL_CONFIGS
     te = pd.Timestamp(train_end)
+    ve = pd.Timestamp(val_end) if val_end else None
     # Eligibility is config-independent → compute it once over all candidate monthly
     # rebalance dates (a superset of the quarterly ones) and share across every config.
     cutoff = pd.Timestamp(start)
@@ -75,20 +78,24 @@ def run_grid(prices, slippage_bps, *, sectors=None, benchmark=None, pit=None,
     for cfg in configs:
         r = run_momentum(prices, slippage_bps, capital=capital, cost_mults=(1.0,),
                          lookback=lookback, skip=skip, start=start, sectors=sectors,
-                         benchmark=benchmark, pit=pit, elig_by_date=elig_by_date,
-                         score_by_date=score_by_date, **cfg.kwargs())
+                         benchmark=benchmark, pit=pit, execute_lag=execute_lag,
+                         elig_by_date=elig_by_date, score_by_date=score_by_date, **cfg.kwargs())
         eq = r["runs"][1.0]["equity"]
         tr = r["runs"][1.0]["trades"]
         years = max((eq.index[-1] - eq.index[0]).days / 365.25, 1e-9) if len(eq) else 1.0
-        cells.append(dict(
+        val_hi = ve if ve is not None else eq.index[-1]
+        cell = dict(
             code=cfg.code, config=cfg,
             train=_stats_slice(eq, tr, eq.index[0], te, capital),
-            val=_stats_slice(eq, tr, te + pd.Timedelta(days=1), eq.index[-1], capital),
+            val=_stats_slice(eq, tr, te + pd.Timedelta(days=1), val_hi, capital),
             full=r["runs"][1.0]["stats"],
             trades_per_year=len(tr) / years,
             timeline=[dict(date=str(h["date"].date()), ret=h["ret"], dead=list(h["dead"]))
-                      for h in r["holdings_log"]]))
-    return dict(cells=cells, train_end=train_end)
+                      for h in r["holdings_log"]])
+        if ve is not None:
+            cell["test"] = _stats_slice(eq, tr, ve + pd.Timedelta(days=1), eq.index[-1], capital)
+        cells.append(cell)
+    return dict(cells=cells, train_end=train_end, val_end=val_end)
 
 
 def feasibility(cell: dict, *, capital: float = 10_000.0, fee_eur: float = 1.0) -> dict:

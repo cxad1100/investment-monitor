@@ -16,7 +16,7 @@ from datetime import datetime
 import pandas as pd
 
 from tools.report_html import pct as _pct, card as _card, page
-from tools.momentum import run_momentum
+from tools.momentum import run_momentum, winsorize_prices
 from tools.universe_pit import PITUniverse
 from tools.universe_assemble import delisting_map
 from tools.momentum_grid import MomentumConfig, _stats_slice
@@ -24,7 +24,8 @@ from tools.portfolio_tools import BENCHMARKS
 from tools.data_buffer import cached_price_history
 from build_momentum_report import (
     PRICES_CSV, META_CSV, ROOT, LOOKBACK, SKIP, START, LIQ_MAX, MIN_PRICE, CAPITAL,
-    FEE_EUR, COST_MULTS, TRAIN_END, _slip, _broker, _pnl_color, sec_holdings, sec_curve,
+    FEE_EUR, COST_MULTS, TRAIN_END, VAL_END, WINSOR_CAP, EXEC_LAG,
+    _slip, _broker, _pnl_color, sec_holdings, sec_curve,
 )
 
 # The chosen strategy — ·B·DE· = sector-neutral, top-10, quarterly.
@@ -55,6 +56,7 @@ def _desc(cfg: MomentumConfig) -> str:
 def gather(force: bool = False, refresh: bool | None = None) -> dict:
     refresh = force if refresh is None else refresh
     prices = pd.read_csv(PRICES_CSV, index_col=0, parse_dates=True)
+    prices = winsorize_prices(prices, cap=WINSOR_CAP)          # de-glitch the raw feed
     meta_df = pd.read_csv(META_CSV)
     meta = {r["ticker"]: dict(r) for _, r in meta_df.iterrows()}
     sectors = {t: (str(m["sector"]) if pd.notna(m.get("sector")) else "Unknown")
@@ -70,14 +72,15 @@ def gather(force: bool = False, refresh: bool | None = None) -> dict:
     res = run_momentum(prices, slip, lookback=LOOKBACK, skip=SKIP, capital=CAPITAL,
                        cost_mults=COST_MULTS, start=START, liq_max=LIQ_MAX, fee_eur=FEE_EUR,
                        min_price=MIN_PRICE, sectors=sectors, benchmark=spx, pit=pit,
-                       **STRATEGY.kwargs())
+                       execute_lag=EXEC_LAG, **STRATEGY.kwargs())
     eq, tr = res["runs"][1.0]["equity"], res["runs"][1.0]["trades"]
-    te = pd.Timestamp(TRAIN_END)
+    te, ve = pd.Timestamp(TRAIN_END), pd.Timestamp(VAL_END)
     train = _stats_slice(eq, tr, eq.index[0], te, CAPITAL)
-    val = _stats_slice(eq, tr, te + pd.Timedelta(days=1), eq.index[-1], CAPITAL)
+    val = _stats_slice(eq, tr, te + pd.Timedelta(days=1), ve, CAPITAL)
+    test = _stats_slice(eq, tr, ve + pd.Timedelta(days=1), eq.index[-1], CAPITAL)
     hits = sum(len(h.get("dead", set())) for h in res["holdings_log"])
     return dict(prices=prices, res=res, benchmarks=bench, capital=CAPITAL, meta=meta,
-                strategy=STRATEGY, train=train, val=val, graveyard_hits=hits,
+                strategy=STRATEGY, train=train, val=val, test=test, graveyard_hits=hits,
                 n_dead=int(meta_df["delisting_date"].notna().sum()))
 
 
@@ -95,15 +98,17 @@ def sec_intro(d: dict) -> str:
 
 def sec_perf(d: dict, public: bool) -> str:
     full = d["res"]["runs"][1.0]["stats"]
+    test = d["test"]
     out = ["<h2>Performance</h2>",
-           "<p class='dim'>Train = 2018–2022 (in-sample), validation = 2023→ "
-           "(out-of-sample, never used to choose the config), full = the whole window. "
-           "A strategy that holds up in validation is the real test.</p>"]
+           "<p class='dim'>Train = 2018–21 (used to pick the config), validation = 2022–23 "
+           "(used to compare configs), <b>test = 2024→ (held out — never touched the "
+           "choice)</b>. The <b>test</b> column is the only truly out-of-sample number; "
+           "trust it over the eye-popping full-window total.</p>"]
     cards = [
+        _card("Test net return", _pct(test["net_return"] * 100)),
+        _card("Test Sharpe", f"{test['sharpe']:.2f}"),
+        _card("Test max DD", _pct(test["max_drawdown"] * 100)),
         _card("Full net return", _pct(full["net_return"] * 100)),
-        _card("Full Sharpe", f"{full['sharpe']:.2f}"),
-        _card("Validation Sharpe", f"{d['val']['sharpe']:.2f}"),
-        _card("Max drawdown", _pct(full["max_drawdown"] * 100)),
     ]
     if not public:
         cards.append(_card("Net P&L", f"€{full['net_return'] * d['capital']:+,.0f}"))
@@ -112,8 +117,8 @@ def sec_perf(d: dict, public: bool) -> str:
         f"<tr><td>{name}</td><td class='num'>{_pct(s['net_return'] * 100)}</td>"
         f"<td class='num mono'>{s['sharpe']:.2f}</td>"
         f"<td class='num'>{_pct(s['max_drawdown'] * 100)}</td></tr>"
-        for name, s in (("Train 2018–22", d["train"]), ("Validation 2023→", d["val"]),
-                        ("Full 2018→", full)))
+        for name, s in (("Train 2018–21", d["train"]), ("Validation 2022–23", d["val"]),
+                        ("Test 2024→ (held out)", test), ("Full 2018→", full)))
     out.append("<table><tr><th>Window</th><th class='num'>Net return</th>"
                "<th class='num'>Sharpe</th><th class='num'>Max DD</th></tr>" + rows + "</table>")
     return "".join(out)
@@ -142,7 +147,7 @@ def sec_timeline(d: dict) -> str:
 
 def sec_caveat(d: dict) -> str:
     hits = d.get("graveyard_hits", 0)
-    val_ret = d["val"]["net_return"] * 100
+    test_ret = d["test"]["net_return"] * 100
     surv = (f"it held <b>0</b> of them into death" if hits == 0 else
             f"it held <b>{hits}</b> into delisting, liquidated by the graveyard at the last price")
     return (
@@ -155,8 +160,8 @@ def sec_caveat(d: dict) -> str:
         f'liquid global large-caps (Nvidia, Palantir, Seagate via Frankfurt), so a small '
         f'account deploys without moving a price.'
         f'<br><br>The real caveats: <b>(1) Regime</b> — 2023→ was an exceptional momentum '
-        f'tape; the {val_ret:+.0f}% validation figure is regime-specific and will <b>not</b> '
-        f'repeat. <b>(2) Concentration</b> — top-{d["strategy"].slots}, so a couple of explosive '
+        f'tape; even the held-out {test_ret:+.0f}% test figure is regime-specific and will '
+        f'<b>not</b> repeat. <b>(2) Concentration</b> — top-{d["strategy"].slots}, so a couple of explosive '
         f'names drive the curve; one bad blow-up hurts disproportionately. <b>(3) Global/FX</b> '
         f'— foreign cross-listings carry currency risk and price on their home exchange; the '
         f'Frankfurt fill can lag. <b>(4) Mechanics</b> — daily closes, €1/order, slippage '

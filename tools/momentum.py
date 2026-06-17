@@ -120,6 +120,40 @@ def trend_ok(benchmark: pd.Series, asof, ma: int = 200) -> bool:
     return float(s.iloc[-1]) >= float(s.iloc[-ma:].mean())
 
 
+def winsorize_prices(prices: pd.DataFrame, cap: float = 0.5) -> pd.DataFrame:
+    """Rebuild a price frame with daily returns clipped to ±`cap`, recompounded from
+    each column's first valid price. Kills split-adjustment glitches — a Frankfurt
+    cross-listing feed printing a +1500% one-day jump (Orkla, Seadrill) that momentum
+    would otherwise chase into a phantom return. Clean columns are untouched; NaN tails
+    (dead names) are preserved so the graveyard still liquidates them. A capped glitch
+    spike now reverses the next bar, so the name looks *choppy* to momentum, not
+    explosive — exactly the de-selection we want. Cap is a judgment call: ±50% kills
+    glitches while keeping all but the rarest real one-day moves."""
+    r = prices.pct_change().clip(lower=-cap, upper=cap)
+    out = {}
+    for c in prices.columns:
+        s = prices[c]
+        first = s.first_valid_index()
+        if first is None:
+            continue
+        rc = r[c].loc[first:].copy()
+        rc.iloc[0] = 0.0
+        lvl = float(s.loc[first]) * (1.0 + rc.fillna(0.0)).cumprod()
+        lvl[s.loc[first:].isna()] = float("nan")          # keep dead/gap tails as NaN
+        out[c] = lvl
+    return pd.DataFrame(out).reindex(prices.index)
+
+
+def _exec_date(index: pd.DatetimeIndex, d, lag: int = 0):
+    """Execution bar for a signal at date `d`: `lag`=0 trades at the signal-day close
+    (baseline), `lag`=1 at the next bar (t+1 — you can't trade on the same close you
+    used to rank). Clamps at the end of the index."""
+    if lag <= 0:
+        return d
+    pos = index.searchsorted(pd.Timestamp(d), side="right")   # first bar strictly after d
+    return index[min(pos + lag - 1, len(index) - 1)]
+
+
 def run_momentum(prices: pd.DataFrame, slippage_bps: dict, *, k: int = 15,
                  lookback: int = 252, skip: int = 21, capital: float = 10_000.0,
                  cost_mults: tuple = (0.0, 1.0, 2.0), freq: str = "M",
@@ -128,6 +162,7 @@ def run_momentum(prices: pd.DataFrame, slippage_bps: dict, *, k: int = 15,
                  vol_adjust: bool = False, sectors: dict | None = None,
                  sector_neutral: bool = False, benchmark=None,
                  trend_filter: bool = False, lazy: bool = False, pit=None,
+                 execute_lag: int = 0,
                  elig_by_date: dict | None = None,
                  score_by_date: dict | None = None) -> dict:
     """Walk-forward momentum backtest.
@@ -143,6 +178,8 @@ def run_momentum(prices: pd.DataFrame, slippage_bps: dict, *, k: int = 15,
     A `pit` (PITUniverse) activates point-in-time eligibility (already-dead names are
     never picked) and the graveyard — a name dying mid-hold is forward-filled to its
     last traded price (liquidated to cash) so the backtest eats the real loss.
+    `execute_lag=1` fills one bar after the signal (t+1) instead of at the signal-day
+    close, removing the same-bar look-ahead; scores still use only data through `d`.
     """
     dates = [d for d in rebalance_dates(prices.index, freq)
              if len(prices.loc[:d]) >= lookback + 1]
@@ -183,6 +220,7 @@ def run_momentum(prices: pd.DataFrame, slippage_bps: dict, *, k: int = 15,
         prev: set[str] = set()
         for h in holdings_log:
             d, nxt, picks = h["date"], h["next"], h["picks"]
+            ed, enxt = _exec_date(prices.index, d, execute_lag), _exec_date(prices.index, nxt, execute_lag)
             if not picks:
                 if prev:                                # liquidate to cash: charge exit
                     equity_val -= sum(fee_eur + slippage_bps[t] / 1e4 * (equity_val / len(prev))
@@ -194,7 +232,7 @@ def run_momentum(prices: pd.DataFrame, slippage_bps: dict, *, k: int = 15,
             cost = sum(fee_eur + slippage_bps[t] / 1e4 * w
                        for t in traded) * mult
             equity_val -= cost
-            seg = prices.loc[d:nxt, picks].ffill().bfill()  # ffill: dead leg held at last price;
+            seg = prices.loc[ed:enxt, picks].ffill().bfill()  # ffill: dead leg held at last price;
             #   bfill: if the rebalance date is a non-trading day (e.g. a Dec-31 holiday that
             #   only sits in the index because another name printed), the leading NaN can't be
             #   forward-filled — use the first tradeable price on/after d so the period return

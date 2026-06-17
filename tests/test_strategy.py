@@ -16,12 +16,13 @@ def _fake_d():
     slip = {t: 10 for t in px.columns}
     res = run_momentum(px, slip, k=5, lookback=200, skip=10, cost_mults=(1.0,))
     eq, tr = res["runs"][1.0]["equity"], res["runs"][1.0]["trades"]
-    te = pd.Timestamp("2019-06-30")
+    te, ve = pd.Timestamp("2019-06-30"), pd.Timestamp("2019-09-30")
     return dict(prices=px, res=res, benchmarks=pd.DataFrame(index=idx), capital=10_000.0,
                 meta={t: dict(name=t, local_id="000", country="X", sector="Y") for t in px.columns},
                 strategy=bs.STRATEGY,
                 train=_stats_slice(eq, tr, eq.index[0], te, 10_000.0),
-                val=_stats_slice(eq, tr, te + pd.Timedelta(days=1), eq.index[-1], 10_000.0),
+                val=_stats_slice(eq, tr, te + pd.Timedelta(days=1), ve, 10_000.0),
+                test=_stats_slice(eq, tr, ve + pd.Timedelta(days=1), eq.index[-1], 10_000.0),
                 n_dead=42)
 
 

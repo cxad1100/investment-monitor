@@ -2,7 +2,33 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from tools.momentum import rebalance_dates, momentum_scores, eligible, select_topk
+from tools.momentum import (rebalance_dates, momentum_scores, eligible, select_topk,
+                            winsorize_prices, _exec_date)
+
+
+def test_winsorize_caps_glitch_spikes_keeps_clean_column():
+    idx = pd.bdate_range("2020-01-01", periods=12)
+    clean = pd.Series(np.linspace(100, 112, 12), index=idx)
+    glitch = clean.copy()
+    glitch.iloc[6] = glitch.iloc[5] * 10.0                 # +900% split glitch
+    w = winsorize_prices(pd.DataFrame({"CLEAN": clean, "GLITCH": glitch}), cap=0.5)
+    assert np.allclose(w["CLEAN"].values, clean.values)    # clean column untouched
+    assert w["GLITCH"].pct_change().dropna().max() <= 0.5 + 1e-9   # spike capped
+
+
+def test_winsorize_preserves_dead_tail_nan():
+    idx = pd.bdate_range("2020-01-01", periods=10)
+    s = pd.Series(list(np.linspace(100, 50, 6)) + [np.nan] * 4, index=idx)
+    w = winsorize_prices(pd.DataFrame({"D": s}), cap=0.5)
+    assert w["D"].iloc[:6].notna().all() and w["D"].iloc[6:].isna().all()
+
+
+def test_exec_date_lag_shifts_to_next_bar():
+    idx = pd.bdate_range("2020-01-01", periods=5)
+    assert _exec_date(idx, idx[0], 0) == idx[0]            # lag 0 = signal-day close
+    assert _exec_date(idx, idx[0], 1) == idx[1]            # lag 1 = next bar
+    assert _exec_date(idx, idx[2], 1) == idx[3]
+    assert _exec_date(idx, idx[-1], 1) == idx[-1]          # clamps at the end
 
 
 def test_eligible_drops_illiquid_and_short_history():
