@@ -34,6 +34,7 @@ LOOKBACK     = 252
 SKIP         = 21
 REBAL        = "M"
 START        = "2018-01-01"   # first rebalance (MiFID era); full 9y survivorship-corrected window
+TRAIN_END    = "2022-12-31"   # train ≤ this (in-sample); validation after (out-of-sample)
 LIQ_MAX      = 30
 MIN_PRICE    = 1.0        # drop sub-€1 penny listings (12-1 momentum = tick noise there)
 CAPITAL      = 10_000.0   # paper account, EUR
@@ -84,7 +85,7 @@ def gather(force: bool = False, refresh: bool | None = None, with_grid: bool = T
                        cost_mults=COST_MULTS, freq=REBAL, liq_max=LIQ_MAX, fee_eur=FEE_EUR,
                        min_price=MIN_PRICE, start=START, pit=pit)
     grid = (run_grid(prices, slip, sectors=sectors, benchmark=spx, pit=pit, start=START,
-                     train_end="2022-12-31", capital=CAPITAL, lookback=LOOKBACK, skip=SKIP)
+                     train_end=TRAIN_END, capital=CAPITAL, lookback=LOOKBACK, skip=SKIP)
             if with_grid else None)
 
     return dict(prices=prices, res=res, benchmarks=bench, capital=CAPITAL, meta=meta,
