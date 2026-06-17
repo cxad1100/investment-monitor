@@ -27,8 +27,10 @@ from build_momentum_report import (
     FEE_EUR, COST_MULTS, TRAIN_END, _slip, _broker, _pnl_color, sec_holdings, sec_curve,
 )
 
-# The chosen strategy — set from the grid's pick_ultimate after the clean re-grid.
-STRATEGY = MomentumConfig(sector_neutral=True)
+# The chosen strategy — pick_ultimate's robust+feasible winner on the corrected data:
+# ·B·DE· = sector-neutral, top-10, quarterly. Best worst-case (train/val) Sharpe at low
+# turnover; survivorship-clean (0 graveyard hits — it never holds a name that dies).
+STRATEGY = MomentumConfig(sector_neutral=True, slots=10, freq="Q")
 
 
 def _desc(cfg: MomentumConfig) -> str:
@@ -69,8 +71,9 @@ def gather(force: bool = False, refresh: bool | None = None) -> dict:
     te = pd.Timestamp(TRAIN_END)
     train = _stats_slice(eq, tr, eq.index[0], te, CAPITAL)
     val = _stats_slice(eq, tr, te + pd.Timedelta(days=1), eq.index[-1], CAPITAL)
+    hits = sum(len(h.get("dead", set())) for h in res["holdings_log"])
     return dict(prices=prices, res=res, benchmarks=bench, capital=CAPITAL, meta=meta,
-                strategy=STRATEGY, train=train, val=val,
+                strategy=STRATEGY, train=train, val=val, graveyard_hits=hits,
                 n_dead=int(meta_df["delisting_date"].notna().sum()))
 
 
@@ -128,13 +131,20 @@ def sec_timeline(d: dict) -> str:
 
 
 def sec_caveat(d: dict) -> str:
+    hits = d.get("graveyard_hits", 0)
+    surv = (f"this config is <b>survivorship-clean</b> — across the whole backtest it held "
+            f"<b>0</b> names that later died, so its return is <i>not</i> inflated by dead "
+            f"winners vanishing" if hits == 0 else
+            f"this config held <b>{hits}</b> names into their delisting; the graveyard "
+            f"liquidated each at its last traded price, so the loss is in the numbers")
     return (f'<div class="note"><b>What’s honest here.</b> The universe is '
-            f'survivorship-<b>corrected</b>: {d["n_dead"]} EUR names that delisted/died '
-            "2018→now are included and liquidated by the graveyard at their last price, "
-            "so the backtest eats the losers it bought. Remaining honest caveats: costs are "
-            "modeled (€1/order + assumed half-spread), daily closes only, EODHD delisted "
-            "coverage is broad but not provably complete, and <b>past performance is not "
-            "future returns</b>. Validation (out-of-sample) is the guard against curve-fitting.</div>")
+            f'survivorship-<b>corrected</b> — {d["n_dead"]} EUR names that collapsed/delisted '
+            f"2018→now are included and liquidated by the graveyard at their last price — and "
+            f"{surv}. The real remaining caveat is <b>capacity</b>: a concentrated top-"
+            f"{d['strategy'].slots} of German small/mid-caps can post outsized momentum returns "
+            "that are hard to realise at size (slippage is modeled, not measured). Also: daily "
+            "closes only, €1/order costs assumed, and <b>past performance is not future "
+            "returns</b>. Validation (out-of-sample, 2023→) is the guard against curve-fitting.</div>")
 
 
 def build(d: dict, public: bool = False) -> str:

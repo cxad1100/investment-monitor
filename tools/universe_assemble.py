@@ -28,7 +28,7 @@ def assemble_meta(survivors: pd.DataFrame, misses: list[dict],
         miss["delisting_date"] = pd.NaT
     dead = dead.copy()
     if not dead.empty:
-        dead["delisting_date"] = pd.to_datetime(dead["delisting_date"])
+        dead["delisting_date"] = pd.to_datetime(dead["delisting_date"], format="mixed")
     frames = []
     for df in (surv, miss, dead):
         if df.empty:
