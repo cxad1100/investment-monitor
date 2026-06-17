@@ -17,3 +17,4 @@ data/dead_prices/
 data/global_proxy_prices.csv
 data/global_dead_prices.csv
 data/proxy_prices.csv
+data/proxy_meta.csv
