@@ -24,7 +24,7 @@ from tools.portfolio_tools import BENCHMARKS
 from tools.data_buffer import cached_price_history
 from build_momentum_report import (
     PRICES_CSV, META_CSV, ROOT, LOOKBACK, SKIP, START, LIQ_MAX, MIN_PRICE, CAPITAL,
-    FEE_EUR, COST_MULTS, TRAIN_END, VAL_END, WINSOR_CAP, EXEC_LAG,
+    FEE_EUR, COST_MULTS, TRAIN_END, VAL_END, WINSOR_CAP, EXEC_LAG, MIN_TURNOVER,
     _slip, _broker, _pnl_color, sec_holdings, sec_curve,
 )
 
@@ -58,6 +58,10 @@ def gather(force: bool = False, refresh: bool | None = None) -> dict:
     prices = pd.read_csv(PRICES_CSV, index_col=0, parse_dates=True)
     prices = winsorize_prices(prices, cap=WINSOR_CAP)          # de-glitch the raw feed
     meta_df = pd.read_csv(META_CSV)
+    if "med_turnover" in meta_df.columns:                      # liquidity floor (drops dead .F feeds)
+        liquid = (meta_df["med_turnover"] >= MIN_TURNOVER) | meta_df["delisting_date"].notna()
+        meta_df = meta_df[liquid].reset_index(drop=True)
+        prices = prices[[c for c in prices.columns if c in set(meta_df["ticker"])]]
     meta = {r["ticker"]: dict(r) for _, r in meta_df.iterrows()}
     sectors = {t: (str(m["sector"]) if pd.notna(m.get("sector")) else "Unknown")
                for t, m in meta.items()}
@@ -90,10 +94,12 @@ def sec_intro(d: dict) -> str:
             "Picked from the 64-permutation grid for the highest <b>out-of-sample "
             "(validation) Sharpe</b> among configs that pay for their own trading costs, and "
             "for <b>sector diversification</b> — so the result rides a spread of themes, not "
-            "one lucky rally. The universe is whatever is <b>tradeable on Trade Republic / "
-            "Lang &amp; Schwarz</b>: that includes liquid foreign names cross-listed in "
-            "Frankfurt (Nvidia, Palantir…), so this is really broker-access <i>global</i> "
-            "momentum, not German small-caps. Long-only, walk-forward, executable. Not advice.</div>")
+            "one lucky rally. The universe is the <b>liquid German-exchange</b> names "
+            "(German blue/mid-caps like Rheinmetall &amp; Siemens Energy, plus foreign names "
+            "carrying real German liquidity like Palantir on XETRA), filtered to a <b>≥100k/day "
+            "turnover</b> floor so the price feed is real — the dead Frankfurt-floor (.F) shadows "
+            "EODHD also lists are excluded as stale. Long-only, walk-forward, executable on "
+            "Trade Republic. Not advice.</div>")
 
 
 def sec_perf(d: dict, public: bool) -> str:
@@ -156,17 +162,20 @@ def sec_caveat(d: dict) -> str:
         f'{d["n_dead"]} EUR names that delisted/collapsed 2018→now, yet {surv}: momentum buys '
         f'<i>winners</i>, and a dying name ranks last long before it goes — so this strategy '
         f'structurally never owns the corpses. The headline is therefore <i>not</i> a '
-        f'survivorship artifact. <b>Capacity isn’t the problem either</b> — the picks are '
-        f'liquid global large-caps (Nvidia, Palantir, Seagate via Frankfurt), so a small '
-        f'account deploys without moving a price.'
-        f'<br><br>The real caveats: <b>(1) Regime</b> — 2023→ was an exceptional momentum '
-        f'tape; even the held-out {test_ret:+.0f}% test figure is regime-specific and will '
-        f'<b>not</b> repeat. <b>(2) Concentration</b> — top-{d["strategy"].slots}, so a couple of explosive '
-        f'names drive the curve; one bad blow-up hurts disproportionately. <b>(3) Global/FX</b> '
-        f'— foreign cross-listings carry currency risk and price on their home exchange; the '
-        f'Frankfurt fill can lag. <b>(4) Mechanics</b> — daily closes, €1/order, slippage '
-        f'modeled not measured, and <b>past performance is not future returns</b>. The '
-        f'out-of-sample validation Sharpe is the guard against curve-fitting, not a promise.</div>')
+        f'survivorship artifact. <b>Capacity isn’t the problem either</b> — every name clears '
+        f'a <b>≥100k/day turnover floor</b>, so a small account deploys without moving a price.'
+        f'<br><br>The real caveats: <b>(1) Regime</b> — 2024→ was an exceptional momentum '
+        f'tape (defence + AI: Rheinmetall, Siemens Energy, Palantir); even the held-out '
+        f'{test_ret:+.0f}% test figure is regime-specific and will <b>not</b> repeat. '
+        f'<b>(2) Concentration</b> — top-{d["strategy"].slots}, so a few names drive the curve; '
+        f'one bad blow-up hurts disproportionately. <b>(3) Coverage</b> — the turnover floor '
+        f'drops dead Frankfurt-floor (.F) shadows whose feed is stale, which also excludes a '
+        f'few genuinely Trade-Republic-investable foreign names (Seagate, Aker BP) that route '
+        f'via Lang &amp; Schwarz off their <i>home</i> price; adding them back cleanly needs a '
+        f'synthetic L&amp;S proxy (US close × EUR/USD), planned. So coverage is conservative, '
+        f'not inflated. <b>(4) Mechanics</b> — daily closes, €1/order, slippage modeled not '
+        f'measured, and <b>past performance is not future returns</b>. The out-of-sample test '
+        f'is the guard against curve-fitting, not a promise.</div>')
 
 
 def build(d: dict, public: bool = False) -> str:

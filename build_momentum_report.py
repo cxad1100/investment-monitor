@@ -38,6 +38,9 @@ TRAIN_END    = "2021-12-31"   # train ≤ this (in-sample, used to choose the co
 VAL_END      = "2023-12-31"   # validation = train_end→here; test = after (never informs the pick)
 LIQ_MAX      = 30
 MIN_PRICE    = 1.0        # drop sub-€1 penny listings (12-1 momentum = tick noise there)
+MIN_TURNOVER = 100_000    # €/day median turnover floor — drops thin/ghost listings whose
+                          #   German-exchange feed is stale/broken (Aker BP ARC.F €0/day,
+                          #   Seagate 847.F €893/day) and only the real prices survive
 WINSOR_CAP   = 0.5        # clip daily returns ±50% — kills split-adjustment glitches
 EXEC_LAG     = 1          # trade t+1 (next bar after the signal), not the signal-day close
 CAPITAL      = 10_000.0   # paper account, EUR
@@ -74,6 +77,10 @@ def gather(force: bool = False, refresh: bool | None = None, with_grid: bool = T
     prices = pd.read_csv(PRICES_CSV, index_col=0, parse_dates=True)
     prices = winsorize_prices(prices, cap=WINSOR_CAP)          # de-glitch the raw feed
     meta_df = pd.read_csv(META_CSV)
+    if "med_turnover" in meta_df.columns:                      # liquidity floor (drops dead .F feeds)
+        liquid = (meta_df["med_turnover"] >= MIN_TURNOVER) | meta_df["delisting_date"].notna()
+        meta_df = meta_df[liquid].reset_index(drop=True)
+        prices = prices[[c for c in prices.columns if c in set(meta_df["ticker"])]]
     meta = {r["ticker"]: dict(r) for _, r in meta_df.iterrows()}
     sectors = {t: (str(m["sector"]) if pd.notna(m.get("sector")) else "Unknown")
                for t, m in meta.items()}
@@ -246,10 +253,11 @@ The universe is survivorship-<i>corrected</i> (delisted/collapsed names are carr
 liquidated by the graveyard, below), and momentum barely feels it anyway: it buys
 <i>winners</i>, so it almost never holds a name into its death. The real reasons the
 headline is optimistic are <b>regime</b> (2023→ was an exceptional momentum tape) and
-<b>concentration</b> (a top-k that a few explosive names dominate). Note too that these
-"broker-tradeable" names include liquid foreign cross-listings on Frankfurt (Nvidia,
-Palantir…), so this is really <i>global</i> momentum via German-exchange access. Daily
-closes only — intraday execution and borrow costs (for any future short overlay) are ignored.
+<b>concentration</b> (a top-k that a few explosive names dominate). The universe is the
+<b>liquid German-exchange</b> set — every name clears a ≥100k/day turnover floor, which
+drops the dead Frankfurt-floor (.F) shadows whose price feed is stale/broken (near-zero
+turnover). Daily closes only — intraday execution and borrow costs (for any future short
+overlay) are ignored.
 </div>"""
 
 
