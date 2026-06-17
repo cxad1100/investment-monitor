@@ -421,15 +421,12 @@ def main():
     print("gathering momentum data (yfinance)...")
     d = gather(refresh=args.refresh)
 
+    # The momentum lab is now the lower half of the Strategy page; this standalone
+    # build is debug-only and writes the local snapshot only (no docs/ export).
     local = ROOT / "local/momentum.html"
     local.parent.mkdir(exist_ok=True)
     local.write_text(build(d, public=False))
-    print(f"wrote {local}")
-
-    pub = ROOT / "docs/momentum.html"
-    pub.parent.mkdir(exist_ok=True)
-    pub.write_text(build(d, public=True))
-    print(f"wrote {pub}  (percentages only)")
+    print(f"wrote {local}  (debug; the live lab is the Strategy page's lower half)")
 
     if args.open:
         webbrowser.open(local.as_uri())

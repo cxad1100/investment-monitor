@@ -21,9 +21,8 @@ from urllib.parse import urlparse, parse_qs
 
 import build_report as B
 import build_pairs_report as P
-import build_momentum_report as M
 import build_scenarios_report as S
-import build_strategy_report as ST
+import build_strategy_report as ST   # the Strategy page folds the momentum lab in as its lower half
 
 PORT = 8000
 
@@ -31,7 +30,6 @@ PORT = 8000
 PAGES = {
     "main":     dict(loader="/",         build="/report",          snap=B.ROOT / "local/report.html"),
     "pairs":    dict(loader="/pairs",    build="/pairs-report",    snap=P.ROOT / "local/pairs.html"),
-    "momentum": dict(loader="/momentum", build="/momentum-report", snap=M.ROOT / "local/momentum.html"),
     "strategy": dict(loader="/strategy", build="/strategy-report", snap=ST.ROOT / "local/strategy.html"),
     "scenarios": dict(loader="/scenarios", build="/scenarios-report", snap=S.ROOT / "local/scenarios.html"),
 }
@@ -141,10 +139,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 d = P.gather(force=force)
                 html = P.build(d, public=False)
                 stale, as_of = None, None
-            elif page == "momentum":
-                d = M.gather(force=force)
-                html = M.build(d, public=False)
-                stale, as_of = None, None
             elif page == "strategy":
                 d = ST.gather(force=force)
                 html = ST.build(d, public=False)
@@ -176,8 +170,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(_loader("/report" + ("?force=1" if force else "")))
         elif path == "/pairs":
             self._send(_loader("/pairs-report" + ("?force=1" if force else "")))
-        elif path == "/momentum":
-            self._send(_loader("/momentum-report" + ("?force=1" if force else "")))
         elif path == "/strategy":
             self._send(_loader("/strategy-report" + ("?force=1" if force else "")))
         elif path == "/scenarios":
@@ -186,8 +178,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._serve_report("main", force)
         elif path == "/pairs-report":
             self._serve_report("pairs", force)
-        elif path == "/momentum-report":
-            self._serve_report("momentum", force)
         elif path == "/strategy-report":
             self._serve_report("strategy", force)
         elif path == "/scenarios-report":

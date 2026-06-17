@@ -19,13 +19,14 @@ from tools.report_html import pct as _pct, card as _card, page
 from tools.momentum import run_momentum, winsorize_prices
 from tools.universe_pit import PITUniverse
 from tools.universe_assemble import delisting_map
-from tools.momentum_grid import MomentumConfig, _stats_slice
+from tools.momentum_grid import MomentumConfig, _stats_slice, run_grid
 from tools.portfolio_tools import BENCHMARKS
 from tools.data_buffer import cached_price_history
 from build_momentum_report import (
     PRICES_CSV, META_CSV, ROOT, LOOKBACK, SKIP, START, LIQ_MAX, MIN_PRICE, CAPITAL,
     FEE_EUR, COST_MULTS, TRAIN_END, VAL_END, WINSOR_CAP, EXEC_LAG, MIN_TURNOVER,
     _slip, _broker, _pnl_color, sec_holdings, sec_curve,
+    sec_grid, sec_feasibility, sec_timelines, sec_survivorship, sec_method,
 )
 
 # The chosen strategy — ·B·DE· = sector-neutral, top-10, quarterly.
@@ -84,9 +85,12 @@ def gather(force: bool = False, refresh: bool | None = None) -> dict:
     val = _stats_slice(eq, tr, te + pd.Timedelta(days=1), ve, CAPITAL)
     test = _stats_slice(eq, tr, ve + pd.Timedelta(days=1), eq.index[-1], CAPITAL)
     hits = sum(len(h.get("dead", set())) for h in res["holdings_log"])
+    grid = run_grid(prices, slip, sectors=sectors, benchmark=spx, pit=pit, start=START,
+                    train_end=TRAIN_END, val_end=VAL_END, capital=CAPITAL,
+                    lookback=LOOKBACK, skip=SKIP, execute_lag=EXEC_LAG)
     return dict(prices=prices, res=res, benchmarks=bench, capital=CAPITAL, meta=meta,
                 strategy=STRATEGY, train=train, val=val, test=test, graveyard_hits=hits,
-                n_dead=int(meta_df["delisting_date"].notna().sum()))
+                grid=grid, n_dead=int(meta_df["delisting_date"].notna().sum()))
 
 
 def sec_intro(d: dict) -> str:
@@ -180,21 +184,31 @@ def sec_caveat(d: dict) -> str:
 
 
 def build(d: dict, public: bool = False) -> str:
+    """One page: the chosen strategy up top (intro → picks → equity → perf → timeline →
+    caveats), then a <hr> and the research lab below (the 64-grid, feasibility, every
+    variation's timeline, the survivorship note, and the method). Local-only output."""
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     cfg = d["strategy"]
-    title = f"Strategy — {cfg.code}" + ("" if public else " (private)")
-    back = "index.html" if public else "report.html"
     body = "".join([
         f"<h1>Momentum strategy — {cfg.code}</h1>",
-        f"<p class='dim'>generated {now} · <a href='{back}'>← monitor</a></p>",
+        f"<p class='dim'>generated {now} · <a href='report.html'>← portfolio</a></p>",
+        # ── the chosen strategy ──
         sec_intro(d),
         sec_holdings(d),
         sec_curve(d),
         sec_perf(d, public),
         sec_timeline(d),
         sec_caveat(d),
+        # ── the lab (private/live only): how this config was chosen + all the rest ──
+        ("".join([
+            "<hr style='margin:3rem 0;border:0;border-top:2px solid #333'>",
+            "<h1>Research lab</h1><p class='dim'>How the config above was chosen — the whole "
+            "64-permutation grid it was picked from, and the supporting data. Skip unless you "
+            "want the workings.</p>",
+            sec_survivorship(d), sec_grid(d), sec_feasibility(d), sec_timelines(d), sec_method(),
+        ]) if not public else ""),
     ])
-    return page(title, body)
+    return page(f"Strategy — {cfg.code}", body)
 
 
 def main():
@@ -205,9 +219,8 @@ def main():
     d = gather(refresh=args.refresh)
     local = ROOT / "local/strategy.html"
     local.parent.mkdir(exist_ok=True)
-    local.write_text(build(d, public=False))
-    (ROOT / "docs/strategy.html").write_text(build(d, public=True))
-    print(f"wrote {local} + docs/strategy.html  (strategy {STRATEGY.code})")
+    local.write_text(build(d))                          # live/local only — no docs/ export
+    print(f"wrote {local}  (strategy {STRATEGY.code} + lab)")
     if args.open:
         webbrowser.open(local.as_uri())
 
