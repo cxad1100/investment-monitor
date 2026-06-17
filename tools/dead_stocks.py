@@ -64,9 +64,31 @@ OUT_META = ROOT / "data" / "eur_delisted.csv"
 OUT_PRICES = ROOT / "data" / "momentum_dead_prices.csv"
 
 
+def is_clean_dead(series: pd.Series, *, min_obs: int = 378, price_floor: float = 0.10,
+                  peak_min: float = 1.0, price_ceiling: float = 50_000.0,
+                  max_up_day: float = 1.0) -> bool:
+    """True if a dead listing's price history is clean enough to trade in a backtest.
+
+    EODHD's bulk delisted feed is full of untradeable Frankfurt micro-cap shadows with
+    broken data — unadjusted splits (a +200% one-day jump), zero-price prints (÷0 → an
+    inf return), perpetual sub-€1 pennies, sparse stubs. Momentum chases those fake
+    up-spikes → astronomical phantom returns. This keeps only names with ≥`min_obs`
+    bars (~1.5y), a peak ≥ €`peak_min`, no near-zero print, a sane price ceiling, and —
+    crucially — **no implausible UP day** (`max_up_day`). A brutal *down* crash day is
+    kept on purpose: that is the death we want the graveyard to feel, not a glitch.
+    """
+    s = series.dropna()
+    if len(s) < min_obs or s.min() < price_floor:
+        return False
+    if not (peak_min <= float(s.max()) <= price_ceiling):
+        return False
+    r = s.pct_change().dropna()
+    return not (r.empty or r.max() > max_up_day)
+
+
 def build_dead_table(seed: list[dict], *, fetch_history, today=None,
                      min_price_alive: float = 1.0, max_survival_ratio: float = 1.0,
-                     max_workers: int = 1):
+                     max_workers: int = 1, clean: bool = False, min_obs: int = 378):
     """Seed/removal candidates → (dead-meta DataFrame, dead-prices DataFrame).
 
     `fetch_history(ticker) -> pd.Series` is injected (EODHD live, fake in tests).
@@ -98,6 +120,8 @@ def build_dead_table(seed: list[dict], *, fetch_history, today=None,
             continue
         if last > max_survival_ratio * peak:               # fair-value withdrawal/buyout, not a death
             continue
+        if clean and not is_clean_dead(s, min_obs=min_obs, peak_min=min_price_alive):
+            continue                                        # glitch/split/penny/stub — untradeable noise
         rows.append({"ticker": c["ticker"], "name": c.get("name", c["ticker"]),
                      "sector": c.get("sector", "Unknown"), "delisting_date": dl,
                      "last_price": last, "peak_price": peak,

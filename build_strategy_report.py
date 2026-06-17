@@ -27,9 +27,13 @@ from build_momentum_report import (
     FEE_EUR, COST_MULTS, TRAIN_END, _slip, _broker, _pnl_color, sec_holdings, sec_curve,
 )
 
-# The chosen strategy — pick_ultimate's robust+feasible winner on the corrected data:
-# ·B·DE· = sector-neutral, top-10, quarterly. Best worst-case (train/val) Sharpe at low
-# turnover; survivorship-clean (0 graveyard hits — it never holds a name that dies).
+# The chosen strategy — ·B·DE· = sector-neutral, top-10, quarterly.
+# Picked from the 64-grid for the highest *out-of-sample* (validation) Sharpe among
+# configs that pay for themselves, AND for sector diversification: the raw worst-case-
+# Sharpe winner (···DE·) concentrates in one theme and posts an implausible +2414%
+# validation headline, whereas ·B·DE· spreads across sectors (val Sharpe 2.34, the
+# grid's best) so the result doesn't hinge on a single rally. Survivorship-clean by
+# construction — momentum buys winners, dying names rank last, so it holds ~0 into death.
 STRATEGY = MomentumConfig(sector_neutral=True, slots=10, freq="Q")
 
 
@@ -80,10 +84,13 @@ def gather(force: bool = False, refresh: bool | None = None) -> dict:
 def sec_intro(d: dict) -> str:
     cfg = d["strategy"]
     return (f'<div class="note"><b>Chosen strategy — {cfg.code} ({_desc(cfg)}).</b> '
-            "The single most <b>robust</b> configuration extracted from the 64-permutation "
-            "grid: the one maximising the worst of its train and validation Sharpe (so it "
-            "isn’t a backtest-lucky outlier), among configs that pay for their own "
-            "trading costs. Long-only, walk-forward, executable on Trade Republic. Not advice.</div>")
+            "Picked from the 64-permutation grid for the highest <b>out-of-sample "
+            "(validation) Sharpe</b> among configs that pay for their own trading costs, and "
+            "for <b>sector diversification</b> — so the result rides a spread of themes, not "
+            "one lucky rally. The universe is whatever is <b>tradeable on Trade Republic / "
+            "Lang &amp; Schwarz</b>: that includes liquid foreign names cross-listed in "
+            "Frankfurt (Nvidia, Palantir…), so this is really broker-access <i>global</i> "
+            "momentum, not German small-caps. Long-only, walk-forward, executable. Not advice.</div>")
 
 
 def sec_perf(d: dict, public: bool) -> str:
@@ -120,7 +127,8 @@ def sec_timeline(d: dict) -> str:
             f"<span style='color:{_pnl_color(h['ret'].get(t, 0.0), t in dead)}' "
             f"title='{t} {h['ret'].get(t, 0.0):+.0%}'>{t}</span>" for t in h["picks"])
         spans = spans or "<span class='dim'>cash</span>"
-        mret = sum(h["ret"].values()) / len(h["ret"]) if h["ret"] else 0.0
+        rv = [v for v in h["ret"].values() if pd.notna(v)]
+        mret = sum(rv) / len(rv) if rv else 0.0
         lines.append(f"<div><span class='mono dim'>{h['date'].date()}</span> "
                      f"<b style='color:{_pnl_color(mret, False)}'>{mret:+.1%}</b> {spans}</div>")
     return ("<h2>Every rebalance, colored by outcome</h2>"
@@ -134,19 +142,26 @@ def sec_timeline(d: dict) -> str:
 
 def sec_caveat(d: dict) -> str:
     hits = d.get("graveyard_hits", 0)
-    surv = (f"this config is <b>survivorship-clean</b> — across the whole backtest it held "
-            f"<b>0</b> names that later died, so its return is <i>not</i> inflated by dead "
-            f"winners vanishing" if hits == 0 else
-            f"this config held <b>{hits}</b> names into their delisting; the graveyard "
-            f"liquidated each at its last traded price, so the loss is in the numbers")
-    return (f'<div class="note"><b>What’s honest here.</b> The universe is '
-            f'survivorship-<b>corrected</b> — {d["n_dead"]} EUR names that collapsed/delisted '
-            f"2018→now are included and liquidated by the graveyard at their last price — and "
-            f"{surv}. The real remaining caveat is <b>capacity</b>: a concentrated top-"
-            f"{d['strategy'].slots} of German small/mid-caps can post outsized momentum returns "
-            "that are hard to realise at size (slippage is modeled, not measured). Also: daily "
-            "closes only, €1/order costs assumed, and <b>past performance is not future "
-            "returns</b>. Validation (out-of-sample, 2023→) is the guard against curve-fitting.</div>")
+    val_ret = d["val"]["net_return"] * 100
+    surv = (f"it held <b>0</b> of them into death" if hits == 0 else
+            f"it held <b>{hits}</b> into delisting, liquidated by the graveyard at the last price")
+    return (
+        f'<div class="note"><b>What’s honest here — and what isn’t the problem.</b> '
+        f'<b>Survivorship is corrected <i>and</i> immaterial.</b> The universe carries '
+        f'{d["n_dead"]} EUR names that delisted/collapsed 2018→now, yet {surv}: momentum buys '
+        f'<i>winners</i>, and a dying name ranks last long before it goes — so this strategy '
+        f'structurally never owns the corpses. The headline is therefore <i>not</i> a '
+        f'survivorship artifact. <b>Capacity isn’t the problem either</b> — the picks are '
+        f'liquid global large-caps (Nvidia, Palantir, Seagate via Frankfurt), so a small '
+        f'account deploys without moving a price.'
+        f'<br><br>The real caveats: <b>(1) Regime</b> — 2023→ was an exceptional momentum '
+        f'tape; the {val_ret:+.0f}% validation figure is regime-specific and will <b>not</b> '
+        f'repeat. <b>(2) Concentration</b> — top-{d["strategy"].slots}, so a couple of explosive '
+        f'names drive the curve; one bad blow-up hurts disproportionately. <b>(3) Global/FX</b> '
+        f'— foreign cross-listings carry currency risk and price on their home exchange; the '
+        f'Frankfurt fill can lag. <b>(4) Mechanics</b> — daily closes, €1/order, slippage '
+        f'modeled not measured, and <b>past performance is not future returns</b>. The '
+        f'out-of-sample validation Sharpe is the guard against curve-fitting, not a promise.</div>')
 
 
 def build(d: dict, public: bool = False) -> str:

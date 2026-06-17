@@ -194,7 +194,11 @@ def run_momentum(prices: pd.DataFrame, slippage_bps: dict, *, k: int = 15,
             cost = sum(fee_eur + slippage_bps[t] / 1e4 * w
                        for t in traded) * mult
             equity_val -= cost
-            seg = prices.loc[d:nxt, picks].ffill()      # dead leg held at last price (cash)
+            seg = prices.loc[d:nxt, picks].ffill().bfill()  # ffill: dead leg held at last price;
+            #   bfill: if the rebalance date is a non-trading day (e.g. a Dec-31 holiday that
+            #   only sits in the index because another name printed), the leading NaN can't be
+            #   forward-filled — use the first tradeable price on/after d so the period return
+            #   isn't NaN. Only leading NaNs are touched (mid-series gaps are ffilled first).
             if lazy:                                     # weights drift, no daily re-equal-weight
                 basket = (seg / seg.iloc[0]).mean(axis=1)
                 for day in seg.index[1:]:

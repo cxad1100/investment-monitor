@@ -92,3 +92,47 @@ def test_build_dead_table_concurrent_matches_sequential():
     a, _ = build_dead_table(seed, fetch_history=fh, today=idx[-1], max_workers=1)
     b, _ = build_dead_table(seed, fetch_history=fh, today=idx[-1], max_workers=4)
     assert list(a["ticker"]) == list(b["ticker"]) == [f"D{i}" for i in range(6)]
+
+
+from tools.dead_stocks import is_clean_dead
+
+
+def _idx(n):
+    return pd.bdate_range("2019-01-01", periods=n)
+
+
+def test_is_clean_dead_keeps_real_crash_rejects_glitches():
+    # a real death: smooth-ish decline WITH a brutal −70% crash day (Wirecard-style) → KEEP
+    crash = list(np.linspace(100, 30, 380)) + [9.0]               # −70% last bar
+    s = pd.Series(crash, index=_idx(381))
+    assert is_clean_dead(s, min_obs=378) is True
+
+    # split/glitch: a single +150% up-day (unadjusted split / bad print) → REJECT
+    g = list(np.linspace(50, 40, 380)); g[200] = g[199] * 2.5
+    assert is_clean_dead(pd.Series(g, index=_idx(380)), min_obs=378) is False
+
+    # zero-price print (division glitch) → REJECT
+    z = list(np.linspace(50, 40, 380)); z[100] = 0.0
+    assert is_clean_dead(pd.Series(z, index=_idx(380)), min_obs=378) is False
+
+    # too short (<1.5y of bars) → REJECT
+    assert is_clean_dead(pd.Series(np.linspace(50, 5, 100), index=_idx(100)), min_obs=378) is False
+
+    # perpetual penny (peak < €1) → REJECT
+    assert is_clean_dead(pd.Series(np.linspace(0.8, 0.2, 380), index=_idx(380)), min_obs=378) is False
+
+
+def test_build_dead_table_rejects_split_glitch_keeps_clean_crash():
+    idx = _idx(420)
+
+    def fh(t):
+        if t == "GLITCH":                       # collapses but has a +200% split-day → drop
+            v = list(np.linspace(100, 5, 400)); v[150] = v[149] * 3.0
+            return pd.Series(v + [np.nan] * 20, index=idx)
+        return pd.Series(list(np.linspace(100, 5, 400)) + [np.nan] * 20, index=idx)  # clean crash
+
+    seed = [{"ticker": "GLITCH", "removal_date": "2019-06-01"},
+            {"ticker": "CLEAN", "removal_date": "2019-06-01"}]
+    table, _ = build_dead_table(seed, fetch_history=fh, today=idx[-1],
+                                max_survival_ratio=0.5, clean=True, min_obs=378)
+    assert list(table["ticker"]) == ["CLEAN"]

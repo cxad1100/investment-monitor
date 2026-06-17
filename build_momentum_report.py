@@ -236,14 +236,15 @@ def sec_rebalance_log(d: dict) -> str:
 def sec_caveat() -> str:
     return f"""
 <div class="note warn">
-<b>Survivorship bias — read the result as relative, not absolute.</b> The universe
-is <i>today's</i> listed, liquid, history-verified names ({len(UNIVERSE)} tickers).
-Backtesting on today's survivors overstates returns: names that delisted (and would
-have been bought then dropped along the way) are absent from the data, and today's
-membership is implicitly projected onto the past. The honest comparison is momentum
-<i>vs an equal-weight buy-hold of the same starting universe</i> above, not the
-headline return in isolation. Daily closes only — intraday execution and borrow
-costs (for any future short overlay) are ignored.
+<b>Read the result as relative, not absolute — but not because of survivorship.</b>
+The universe is survivorship-<i>corrected</i> (delisted/collapsed names are carried and
+liquidated by the graveyard, below), and momentum barely feels it anyway: it buys
+<i>winners</i>, so it almost never holds a name into its death. The real reasons the
+headline is optimistic are <b>regime</b> (2023→ was an exceptional momentum tape) and
+<b>concentration</b> (a top-k that a few explosive names dominate). Note too that these
+"broker-tradeable" names include liquid foreign cross-listings on Frankfurt (Nvidia,
+Palantir…), so this is really <i>global</i> momentum via German-exchange access. Daily
+closes only — intraday execution and borrow costs (for any future short overlay) are ignored.
 </div>"""
 
 
@@ -348,7 +349,8 @@ def sec_timelines(d: dict) -> str:
                 f"<span style='color:{_pnl_color(r, t in dead)}' title='{t} {r:+.0%}'>{t}</span>"
                 for t, r in row["ret"].items())
             spans = spans or "<span class='dim'>cash</span>"
-            mret = sum(row["ret"].values()) / len(row["ret"]) if row["ret"] else 0.0
+            rv = [v for v in row["ret"].values() if pd.notna(v)]
+            mret = sum(rv) / len(rv) if rv else 0.0
             lines.append(f"<div><span class='mono dim'>{row['date']}</span> "
                          f"<b style='color:{_pnl_color(mret, False)}'>{mret:+.1%}</b> {spans}</div>")
         blocks.append(
