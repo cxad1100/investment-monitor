@@ -7,6 +7,7 @@ returns full delisted history ending at the delisting date. Network is injected
 """
 import json
 import pathlib
+import time
 import urllib.request
 
 import pandas as pd
@@ -31,17 +32,25 @@ def _http_get(url: str) -> str:
 
 
 def fetch_eod(symbol: str, *, key: str | None = None, start: str = "2018-01-01",
-              get_fn=_http_get):
+              get_fn=_http_get, retries: int = 2, retry_delay: float = 1.0):
     """Daily adjusted closes for a (possibly delisted) EODHD symbol → Series.
 
-    None if the free-tier 1-year-cap warning is returned (i.e. not upgraded yet)
-    or there is no data. The paid plan returns full history; for a dead listing the
-    last bar is its delisting date.
+    None if the free-tier 1-year-cap warning is returned (not upgraded), there is no
+    data, or the request keeps failing. Transient network errors (a connection reset
+    mid-batch) are retried with backoff so a single blip never aborts a 4k-name run.
     """
     key = key or api_key()
     url = (f"https://eodhd.com/api/eod/{symbol}"
            f"?api_token={key}&fmt=json&from={start}")
-    data = json.loads(get_fn(url))
+    data = None
+    for attempt in range(retries + 1):
+        try:
+            data = json.loads(get_fn(url))
+            break
+        except Exception:
+            if attempt >= retries:
+                return None
+            time.sleep(retry_delay * (attempt + 1))
     if not isinstance(data, list) or not data or "warning" in data[0]:
         return None
     df = pd.DataFrame(data)

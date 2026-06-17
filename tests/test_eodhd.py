@@ -24,6 +24,12 @@ def test_fetch_eod_none_on_empty():
     assert fetch_eod("X.Y", key="x", get_fn=lambda url: "[]") is None
 
 
+def test_fetch_eod_none_on_persistent_error():
+    def boom(url):
+        raise OSError("connection reset")
+    assert fetch_eod("X.Y", key="x", get_fn=boom, retries=0) is None   # blip → skip, don't abort
+
+
 def test_delisted_candidates_keeps_domestic_common_stock_only():
     rows = [
         {"Code": "WDI", "Name": "Wirecard AG", "Isin": "DE0007472060",
