@@ -80,3 +80,15 @@ def test_build_dead_table_collapse_filter_excludes_withdrawals():
             {"ticker": "WITHDRAW", "removal_date": "2019-06-01"}]
     table, _ = build_dead_table(seed, fetch_history=fh, today=idx[-1], max_survival_ratio=0.5)
     assert list(table["ticker"]) == ["COLLAPSE"]    # withdrawal last/peak=0.9 > 0.5 → excluded
+
+
+def test_build_dead_table_concurrent_matches_sequential():
+    idx = pd.bdate_range("2019-01-01", periods=300)
+
+    def fh(t):
+        return pd.Series(list(np.linspace(100, 5, 200)) + [np.nan] * 100, index=idx)
+
+    seed = [{"ticker": f"D{i}", "removal_date": "2019-06-01"} for i in range(6)]
+    a, _ = build_dead_table(seed, fetch_history=fh, today=idx[-1], max_workers=1)
+    b, _ = build_dead_table(seed, fetch_history=fh, today=idx[-1], max_workers=4)
+    assert list(a["ticker"]) == list(b["ticker"]) == [f"D{i}" for i in range(6)]

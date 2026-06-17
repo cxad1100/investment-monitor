@@ -65,7 +65,8 @@ OUT_PRICES = ROOT / "data" / "momentum_dead_prices.csv"
 
 
 def build_dead_table(seed: list[dict], *, fetch_history, today=None,
-                     min_price_alive: float = 1.0, max_survival_ratio: float = 1.0):
+                     min_price_alive: float = 1.0, max_survival_ratio: float = 1.0,
+                     max_workers: int = 1):
     """Seed/removal candidates → (dead-meta DataFrame, dead-prices DataFrame).
 
     `fetch_history(ticker) -> pd.Series` is injected (EODHD live, fake in tests).
@@ -77,9 +78,14 @@ def build_dead_table(seed: list[dict], *, fetch_history, today=None,
     delisting date so its last bar is the last traded price the graveyard uses.
     """
     today = pd.Timestamp(today or pd.Timestamp.today().normalize())
+    if max_workers > 1 and seed:                       # concurrent fetch (the slow part)
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+            hist = list(pool.map(lambda c: fetch_history(c["ticker"]), seed))
+    else:
+        hist = [fetch_history(c["ticker"]) for c in seed]
     rows, cols = [], {}
-    for c in seed:
-        s = fetch_history(c["ticker"])
+    for c, s in zip(seed, hist):
         if s is None or s.dropna().empty:
             continue
         dl = classify_dead(s, removal_date=pd.Timestamp(c["removal_date"]), today=today)
