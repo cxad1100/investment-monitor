@@ -25,7 +25,7 @@ from tools.data_buffer import cached_price_history
 from build_momentum_report import (
     PRICES_CSV, META_CSV, ROOT, LOOKBACK, SKIP, START, LIQ_MAX, MIN_PRICE, CAPITAL,
     FEE_EUR, COST_MULTS, TRAIN_END, VAL_END, WINSOR_CAP, EXEC_LAG, MIN_TURNOVER,
-    _slip, _broker, _pnl_color, sec_holdings, sec_curve,
+    _slip, _broker, _disp, _pnl_color, sec_holdings, sec_curve,
     sec_grid, sec_feasibility, sec_timelines, sec_survivorship, sec_method,
 )
 
@@ -141,7 +141,8 @@ def sec_timeline(d: dict) -> str:
         dead = h.get("dead", set())
         spans = " ".join(
             f"<span style='color:{_pnl_color(h['ret'].get(t, 0.0), t in dead)}' "
-            f"title='{t} {h['ret'].get(t, 0.0):+.0%}'>{t}</span>" for t in h["picks"])
+            f"title='{t} {h['ret'].get(t, 0.0):+.0%}'>{_disp(d['meta'], t)}</span>"
+            for t in h["picks"])
         spans = spans or "<span class='dim'>cash</span>"
         rv = [v for v in h["ret"].values() if pd.notna(v)]
         mret = sum(rv) / len(rv) if rv else 0.0

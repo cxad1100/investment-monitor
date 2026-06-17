@@ -23,7 +23,7 @@ import pandas as pd
 from tools import eodhd
 from tools.synthetic_proxy import to_eur, median_turnover_eur
 from tools.dead_stocks import is_clean_dead
-from tools.build_global_proxy import COUNTRY_EXCH, fx_eur, fetch_cv, _get
+from tools.build_global_proxy import COUNTRY_EXCH, SEED_EXCH, fx_eur, fetch_cv, _get
 
 ROOT = eodhd.ROOT
 FLOOR = 50_000.0                 # €/day while alive (deads run smaller; still tradeable)
@@ -40,16 +40,19 @@ def exch_isin_codes(exch, key, delisted):
 
 def main():
     key = eodhd.api_key()
-    lst = pd.read_csv(ROOT / "data" / "eur_delisted_list.csv")
-    lst = lst[lst["Type"] == "Common Stock"].dropna(subset=["Isin"])
+    # candidate deaths = everything delisted on the L&S venues (XETRA+MU+STU)
+    cands = {}
+    for exch in SEED_EXCH:
+        for isin, code in exch_isin_codes(exch, key, True).items():
+            cands.setdefault(isin, code)
+    print(f"{len(cands)} L&S delisted candidates", flush=True)
     need = {v[0] for v in COUNTRY_EXCH.values()}
     print(f"fetching home active+delisted lists for {len(need)} exchanges…", flush=True)
     active = {e: exch_isin_codes(e, key, False) for e in need}
     dead = {e: exch_isin_codes(e, key, True) for e in need}
 
     targets, seen = [], set()
-    for _, r in lst.iterrows():
-        isin = str(r["Isin"])
+    for isin, gname in cands.items():
         ce = COUNTRY_EXCH.get(isin[:2])
         if not ce or isin in seen:
             continue
@@ -60,31 +63,33 @@ def main():
         if not code:
             continue                                   # not delisted at home either → unknown, skip
         seen.add(isin)
-        targets.append((f"{code}.{exch}", ccy, pence, str(r.get("Name", code))))
+        targets.append((f"{code}.{exch}", ccy, pence, isin, code))
     print(f"{len(targets)} home-confirmed deaths to fetch", flush=True)
 
-    fxs = {c: fx_eur(c, key) for c in {ccy for _, ccy, _, _ in targets}}
+    from tools.build_global_proxy import ISIN_CC
+    fxs = {c: fx_eur(c, key) for c in {ccy for _, ccy, _, _, _ in targets}}
 
     def work(item):
-        sym, ccy, pence, name = item
+        sym, ccy, pence, isin, name = item
         close, vol = fetch_cv(sym, key)
         if close is None:
             return None
         if pence:
             close = close / 100.0
         fx = fxs.get(ccy)
-        eur = close if fx is None else to_eur(close, fx)
-        eur = eur.dropna()
+        eur = (close if fx is None else to_eur(close, fx)).dropna()
         if len(eur) < 252 or float(eur.iloc[-1]) > MAX_SURVIVAL * float(eur.max()):
             return None                                # not a real collapse
-        if not is_clean_dead(eur, min_obs=252):
-            return None
-        if median_turnover_eur(vol, eur, tail=len(eur)) < FLOOR:
+        if float(eur.max()) < 1.0 or not is_clean_dead(eur, min_obs=252):
+            return None                                # sub-€1 penny or unclean
+        med = median_turnover_eur(vol, eur, tail=len(eur))
+        if med < FLOOR:
             return None                                # never liquid while alive
-        return sym, eur, dict(ticker=sym, name=name, sector="Unknown", country="—",
-                              currency="EUR", slippage_bps=25, local_id="",
+        return sym, eur, dict(ticker=sym, name=name, sector="Unknown",
+                              country=ISIN_CC.get(isin[:2], "—"), currency="EUR",
+                              slippage_bps=25, local_id="",
                               delisting_date=str(eur.index[-1].date()),
-                              med_turnover=median_turnover_eur(vol, eur, tail=len(eur)), home=sym)
+                              med_turnover=med, isin=isin, home=sym)
 
     rows, meta, t0 = {}, [], time.time()
     with cf.ThreadPoolExecutor(max_workers=8) as pool:

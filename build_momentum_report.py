@@ -62,6 +62,13 @@ def _broker(t: str) -> str:
     return f"{wkn} · {name}" if wkn else name
 
 
+def _disp(meta: dict, t: str) -> str:
+    """Display ticker: the liquid HOME symbol (STX.US → STX), never the dead .F
+    German shadow that keys the row."""
+    m = meta.get(t, {})
+    return str(m.get("home") or t).split(".")[0]
+
+
 # ── Data assembly ─────────────────────────────────────────────────────────────
 
 def _slip(m) -> int:
@@ -133,8 +140,8 @@ def sec_holdings(d: dict) -> str:
     picks = cur["picks"]
     out = ["<h2>Current top picks</h2>"]
     out.append(f"<p class='dim'>Equal-weight top-{len(picks)} as of {cur['date'].date()}, "
-               "ranked by 12-1 momentum score. Each leg shows its broker WKN · name "
-               "so you can find and trade it in the app.</p>")
+               "ranked by 12-1 momentum score. Each leg shows its home ticker, name and ISIN "
+               "— search the ISIN or name in Trade Republic to trade it.</p>")
     if not picks:
         out.append("<p class='dim'>No eligible names at the latest rebalance.</p>")
         return "".join(out)
@@ -142,16 +149,17 @@ def sec_holdings(d: dict) -> str:
     w = 100.0 / len(picks)
     for t in picks:
         m = d["meta"].get(t, {})
+        home = str(m.get("home") or t).split(".")[0]          # STX.US → STX (search this in TR)
+        isin = m.get("isin") if pd.notna(m.get("isin")) else ""
         rows.append(
-            f"<tr><td class='mono'>{t}</td>"
-            f"<td class='dim' style='font-size:0.8rem'>{_broker(t)}</td>"
+            f"<tr><td class='mono'>{home}</td>"
+            f"<td>{m.get('name', t)}</td>"
+            f"<td class='dim mono' style='font-size:0.72rem'>{isin}</td>"
             f"<td>{m.get('country','—')}</td>"
-            f"<td>{m.get('sector','—')}</td>"
             f"<td class='num mono'>{cur['scores'].get(t, float('nan')) * 100:+.1f}%</td>"
             f"<td class='num mono'>{w:.1f}%</td></tr>")
-    out.append("<table><tr><th>Ticker</th><th>Broker (WKN · name)</th><th>Country</th>"
-               "<th>Sector</th><th class='num'>12-1 momentum</th>"
-               "<th class='num'>Weight</th></tr>"
+    out.append("<table><tr><th>Ticker</th><th>Name</th><th>ISIN</th><th>Country</th>"
+               "<th class='num'>12-1 momentum</th><th class='num'>Weight</th></tr>"
                + "".join(rows) + "</table>")
     return "".join(out)
 
@@ -366,7 +374,8 @@ def sec_timelines(d: dict) -> str:
         for row in c["timeline"]:
             dead = set(row["dead"])
             spans = " ".join(
-                f"<span style='color:{_pnl_color(r, t in dead)}' title='{t} {r:+.0%}'>{t}</span>"
+                f"<span style='color:{_pnl_color(r, t in dead)}' "
+                f"title='{t} {r:+.0%}'>{_disp(d['meta'], t)}</span>"
                 for t, r in row["ret"].items())
             spans = spans or "<span class='dim'>cash</span>"
             rv = [v for v in row["ret"].values() if pd.notna(v)]

@@ -70,22 +70,39 @@ def fetch_cv(sym, key):
     return (close, vol) if len(close) else (None, None)
 
 
+SEED_EXCH = ("XETRA", "MU", "STU")   # Lang & Schwarz retail venues: XETRA + Munich/gettex + Stuttgart
+PRICE_FLOOR = 1.0                    # drop sub-€1 names (penny/tick noise, the "no trash" guardrail)
+ISIN_CC = {"US": "USA", "DE": "Germany", "FR": "France", "CA": "Canada", "CH": "Switzerland",
+           "NL": "Netherlands", "GB": "UK", "IT": "Italy", "ES": "Spain", "SE": "Sweden",
+           "NO": "Norway", "DK": "Denmark", "FI": "Finland", "BE": "Belgium", "AT": "Austria",
+           "IE": "Ireland", "PT": "Portugal", "LU": "Luxembourg"}
+
+
+def seed_companies(key):
+    """{ISIN: (representative_german_ticker, name)} — every common stock on the L&S venues,
+    deduped by ISIN (XETRA listing wins, so the broker line is the liquid one)."""
+    out = {}
+    for exch in reversed(SEED_EXCH):                 # STU, MU, then XETRA last → XETRA overwrites/wins
+        rows = _get(f"https://eodhd.com/api/exchange-symbol-list/{exch}?api_token={key}&fmt=json") or []
+        for r in rows:
+            isin = str(r.get("Isin", ""))
+            if isin and r.get("Type") == "Common Stock":
+                out[isin] = (f"{r['Code']}.{exch}", str(r.get("Name", r["Code"])))
+    return out
+
+
 def main():
     key = eodhd.api_key()
-    uni = _load_universe()
-    pm = pd.read_csv(ROOT / "data" / "proxy_map.csv")
-    isin_of = {t: ("" if pd.isna(v) else str(v)) for t, v in zip(pm["ticker"], pm["isin"])}
-
-    # 1) home (exch, code, ccy, pence) per universe ticker, deduped by ISIN
-    need_exch = {v[0] for c, v in COUNTRY_EXCH.items()}
+    need_exch = {v[0] for v in COUNTRY_EXCH.values()}
     print(f"fetching {len(need_exch)} home exchange lists…", flush=True)
     isin2code = {e: exchange_isin_map(e, key) for e in need_exch}
-    exch_info = {v[0]: (v[1], v[2]) for v in COUNTRY_EXCH.values()}   # exch -> (ccy, pence)
+    exch_info = {v[0]: (v[1], v[2]) for v in COUNTRY_EXCH.values()}
+    companies = seed_companies(key)
+    print(f"L&S seed: {len(companies)} unique companies (XETRA+MU+STU)", flush=True)
 
     def resolve(isin):
-        """Home (sym, ccy, pence) for an ISIN. Try the domicile exchange first, then
-        US (many IE/BM/KY/IL names are US-listed — Seagate is IE-domiciled, NASDAQ STX),
-        then any remaining exchange. ISIN country ≠ listing venue, so don't trust it alone."""
+        """Home (sym, ccy, pence) for an ISIN: domicile exchange first, then US (many
+        IE/BM/KY names are US-listed — Seagate is IE-domiciled, NASDAQ STX), then any."""
         dom = COUNTRY_EXCH.get(isin[:2])
         order = ([dom[0]] if dom else []) + (["US"] if (not dom or dom[0] != "US") else [])
         order += [e for e in isin2code if e not in order]
@@ -96,54 +113,48 @@ def main():
                 return f"{code}.{e}", ccy, pence
         return None
 
-    targets, seen = [], set()
-    for t, m in uni.items():
-        isin = isin_of.get(t, "")
-        if len(isin) < 2 or isin in seen:
+    targets = []
+    for isin, (ger, name) in companies.items():
+        if len(isin) < 2:
             continue
         home = resolve(isin)
-        if not home:
-            continue
-        seen.add(isin)
-        sym, ccy, pence = home
-        targets.append((t, sym, ccy, pence, m))
-    print(f"mapped {len(targets)} unique companies to home tickers", flush=True)
+        if home:
+            sym, ccy, pence = home
+            targets.append((ger, sym, ccy, pence, isin, name))
+    print(f"mapped {len(targets)} to home tickers", flush=True)
 
-    # 2) FX series per currency
-    fxs = {c: fx_eur(c, key) for c in {ccy for _, _, ccy, _, _ in targets}}
+    fxs = {c: fx_eur(c, key) for c in {ccy for _, _, ccy, _, _, _ in targets}}
 
-    # 3) concurrent home EOD fetch → EUR proxy + liquidity floor
     def work(item):
-        ger, sym, ccy, pence, m = item
+        ger, sym, ccy, pence, isin, name = item
         close, vol = fetch_cv(sym, key)
         if close is None:
             return None
         if pence:
             close = close / 100.0
         fx = fxs.get(ccy)
-        eur = close if fx is None else to_eur(close, fx)
-        if len(eur) < 300:
-            return None
+        eur = (close if fx is None else to_eur(close, fx)).dropna()
+        if len(eur) < 300 or float(eur.tail(60).median()) < PRICE_FLOOR:
+            return None                                  # too short, or sub-€1 penny
         med = median_turnover_eur(vol, eur)
         if med < FLOOR:
-            return None
-        return ger, eur, dict(ticker=ger, name=m.get("name", sym), sector=m.get("sector", "Unknown"),
-                              country=m.get("country", "—"), currency="EUR",
-                              slippage_bps=m.get("slippage_bps", 25), local_id=m.get("local_id", ""),
-                              delisting_date="", med_turnover=med, home=sym)
+            return None                                  # illiquid
+        return ger, eur, dict(ticker=ger, name=name, sector="Unknown",
+                              country=ISIN_CC.get(isin[:2], "—"), currency="EUR",
+                              slippage_bps=25, local_id="", delisting_date="",
+                              med_turnover=med, isin=isin, home=sym)
 
     rows, meta, t0 = {}, [], time.time()
-    with cf.ThreadPoolExecutor(max_workers=8) as pool:
+    with cf.ThreadPoolExecutor(max_workers=12) as pool:
         for i, r in enumerate(pool.map(work, targets), 1):
             if r:
                 ger, eur, mrow = r
                 rows[ger] = eur
                 meta.append(mrow)
-            if i % 250 == 0:
+            if i % 500 == 0:
                 print(f"  {i}/{len(targets)} kept={len(rows)} {time.time()-t0:.0f}s", flush=True)
 
-    px = pd.DataFrame(rows).sort_index()
-    px.to_csv(ROOT / "data" / "global_proxy_prices.csv")
+    pd.DataFrame(rows).sort_index().to_csv(ROOT / "data" / "global_proxy_prices.csv")
     pd.DataFrame(meta).to_csv(ROOT / "data" / "global_proxy_meta.csv", index=False)
     print(f"DONE {time.time()-t0:.0f}s: {len(rows)} liquid home-sourced names "
           f"-> global_proxy_prices.csv + global_proxy_meta.csv", flush=True)
