@@ -255,10 +255,10 @@ liquidated by the graveyard, below), and momentum barely feels it anyway: it buy
 <i>winners</i>, so it almost never holds a name into its death. The real reasons the
 headline is optimistic are <b>regime</b> (2023→ was an exceptional momentum tape) and
 <b>concentration</b> (a top-k that a few explosive names dominate). The universe is the
-<b>liquid German-exchange</b> set — every name clears a ≥100k/day turnover floor, which
-drops the dead Frankfurt-floor (.F) shadows whose price feed is stale/broken (near-zero
-turnover). Daily closes only — intraday execution and borrow costs (for any future short
-overlay) are ignored.
+liquid, <b>Trade-Republic-investable</b> set across 18 countries, each priced off its
+<b>home exchange × FX</b> (the Lang &amp; Schwarz model — Seagate on NASDAQ, not the dead
+Frankfurt-floor .F shadow), behind a ≥100k/day turnover floor. Daily closes only — intraday
+execution and borrow costs (for any future short overlay) are ignored.
 </div>"""
 
 

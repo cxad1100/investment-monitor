@@ -95,12 +95,12 @@ def sec_intro(d: dict) -> str:
             "Picked from the 64-permutation grid for the highest <b>out-of-sample "
             "(validation) Sharpe</b> among configs that pay for their own trading costs, and "
             "for <b>sector diversification</b> — so the result rides a spread of themes, not "
-            "one lucky rally. The universe is the <b>liquid German-exchange</b> names "
-            "(German blue/mid-caps like Rheinmetall &amp; Siemens Energy, plus foreign names "
-            "carrying real German liquidity like Palantir on XETRA), filtered to a <b>≥100k/day "
-            "turnover</b> floor so the price feed is real — the dead Frankfurt-floor (.F) shadows "
-            "EODHD also lists are excluded as stale. Long-only, walk-forward, executable on "
-            "Trade Republic. Not advice.</div>")
+            "one lucky rally. The universe is the liquid, <b>Trade-Republic-investable</b> names "
+            "across 18 countries, each priced off its <b>home exchange × EUR/USD</b> — the way "
+            "Lang &amp; Schwarz actually fills you. So Seagate uses real NASDAQ data, Rheinmetall "
+            "XETRA, Aker BP Oslo — not the dead Frankfurt-floor (.F) shadow EODHD lists. "
+            "Filtered to a <b>≥100k/day turnover</b> floor. Long-only, walk-forward, executable. "
+            "Not advice.</div>")
 
 
 def sec_perf(d: dict, public: bool) -> str:
@@ -169,12 +169,12 @@ def sec_caveat(d: dict) -> str:
         f'tape (defence + AI: Rheinmetall, Siemens Energy, Palantir); even the held-out '
         f'{test_ret:+.0f}% test figure is regime-specific and will <b>not</b> repeat. '
         f'<b>(2) Concentration</b> — top-{d["strategy"].slots}, so a few names drive the curve; '
-        f'one bad blow-up hurts disproportionately. <b>(3) Coverage</b> — the turnover floor '
-        f'drops dead Frankfurt-floor (.F) shadows whose feed is stale, which also excludes a '
-        f'few genuinely Trade-Republic-investable foreign names (Seagate, Aker BP) that route '
-        f'via Lang &amp; Schwarz off their <i>home</i> price; adding them back cleanly needs a '
-        f'synthetic L&amp;S proxy (US close × EUR/USD), planned. So coverage is conservative, '
-        f'not inflated. <b>(4) Mechanics</b> — daily closes, €1/order, slippage modeled not '
+        f'one bad blow-up hurts disproportionately. <b>(3) Coverage</b> — every name is priced '
+        f'off its <i>home</i> exchange × FX (the L&amp;S model), so liquid foreign names '
+        f'(Seagate, Aker BP) are included with real data — active <i>and</i> delisted (home '
+        f'status separates a real death from a mere Frankfurt withdrawal). Residual gap: '
+        f'countries outside the 18 mapped (China/HK, Japan, Australia) aren’t in yet. '
+        f'<b>(4) Mechanics</b> — daily closes, €1/order, slippage modeled not '
         f'measured, and <b>past performance is not future returns</b>. The out-of-sample test '
         f'is the guard against curve-fitting, not a promise.</div>')
 
