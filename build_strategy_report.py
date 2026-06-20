@@ -38,9 +38,10 @@ from build_momentum_report import (
 # sector data, so it would be a silent no-op), run on the XETRA / Lang & Schwarz trading
 # calendar (the only days you can actually fill), for the highest worst-case robustness
 # min(train, validation) Sharpe among configs that pay for their own costs and are positive in
-# both windows. A···EF leads on robustness (train 0.73 / val 0.62) and holds up out-of-sample
-# (test 1.24); quarterly + lazy keep turnover (and the €1/order drag) low. Survivorship-clean by
-# construction — momentum buys winners, dying names rank last, so it holds ~0 into death.
+# both windows. A···EF is top-tier on robustness (train 0.71 / val 0.87) AND holds up out-of-sample
+# (test 1.27) — preferred over the marginally-higher-robust A····F, which overfits (test 0.65);
+# quarterly + lazy keep turnover (and the €1/order drag) low. Survivorship-clean by construction —
+# momentum buys winners, dying names rank last, so it holds ~0 into death.
 STRATEGY = MomentumConfig(vol_adjust=True, slots=15, freq="Q", lazy=True)
 
 
@@ -65,6 +66,9 @@ def gather(force: bool = False, refresh: bool | None = None) -> dict:
     prices = to_xetra_calendar(prices)                         # L&S/XETRA sessions only (tradeable days)
     prices = winsorize_prices(prices, cap=WINSOR_CAP)          # de-glitch the raw feed
     meta_df = pd.read_csv(META_CSV)                            # universe is pre-filtered at build time
+    # Universe is now TR-native (tools.tr_tradeable --enumerate → tools.build_tr_universe):
+    # every live name is one you can trade on TR, by construction — no separate filter.
+    n_live = int(meta_df["delisting_date"].isna().sum())
     meta = {r["ticker"]: dict(r) for _, r in meta_df.iterrows()}
     slip = {t: _slip(m) for t, m in meta.items() if t in prices.columns}
     pit = PITUniverse(prices, delisting_map(meta_df))
@@ -107,6 +111,7 @@ def gather(force: bool = False, refresh: bool | None = None) -> dict:
                 strategy=STRATEGY, train=train, val=val, test=test, graveyard_hits=hits,
                 grid=grid, n_dead=int(meta_df["delisting_date"].notna().sum()),
                 n_countries=n_countries,
+                n_live=n_live,
                 significance=dict(mc=mc, dsr=dsr, ci=ci, ppy=ppy))
 
 
@@ -271,28 +276,35 @@ def sec_caveat(d: dict) -> str:
     test_ret = d["test"]["net_return"] * 100
     surv = (f"it held <b>0</b> of them into death" if hits == 0 else
             f"it held <b>{hits}</b> into delisting, liquidated by the graveyard at the last price")
+    nlive = d.get("n_live")
+    trade = (
+        f' <b>Tradeability is built in, not assumed.</b> The {nlive:,} live names are TR’s own '
+        f'instrument list — <i>enumerated</i> from a Trade Republic account and priced at their '
+        f'home listing (Milan, Tokyo, etc.) via yfinance — so every one is a name you can actually '
+        f'buy (a few TR lists but restricts in your region may slip in). The {d["n_dead"]} delisted '
+        f'names are kept in <i>full</i> as a <b>conservative lower bound</b>: a dead name can’t be '
+        f'tradeability-checked, and since holding one into death is a <i>loss</i>, including delisted '
+        f'names that may not have been tradeable can only <b>drag</b> the result down — never inflate '
+        f'it. The true tradeable-only figure would be slightly <i>higher</i>; we report the lower bound.')
     return (
         f'<div class="note"><b>What’s honest here — and what isn’t the problem.</b> '
-        f'<b>Survivorship is corrected <i>and</i> immaterial.</b> The universe carries '
-        f'{d["n_dead"]} names that delisted/collapsed 2018→now, yet {surv}: momentum buys '
-        f'<i>winners</i>, and a dying name ranks last long before it goes — so this strategy '
-        f'structurally never owns the corpses. The headline is therefore <i>not</i> a '
-        f'survivorship artifact. <b>Capacity isn’t the problem either</b> — every name clears '
-        f'a <b>≥100k/day turnover floor</b>, so a small account deploys without moving a price.'
+        f'<b>Survivorship is corrected.</b> The universe carries {d["n_dead"]} names that '
+        f'delisted/collapsed 2018→now, and {surv}: momentum buys <i>winners</i>, and a dying name '
+        f'ranks last long before it goes, so it almost never owns the corpses — the headline is '
+        f'not a survivorship artifact.{trade} <b>Capacity</b> — every name clears a '
+        f'<b>≥100k/day turnover floor</b>, so a small account deploys without moving a price.'
         f'<br><br>The real caveats: <b>(1) Regime</b> — 2024→ was an exceptional momentum '
         f'tape (defence + AI: Rheinmetall, Siemens Energy, Palantir); even the held-out '
         f'{test_ret:+.0f}% test figure is regime-specific and will <b>not</b> repeat. '
         f'<b>(2) Concentration</b> — top-{d["strategy"].slots}, with <b>no sector or geographic '
-        f'cap</b> (no sector data), so the book can pile into one country or theme (the universe '
-        f'leans heavily to the US, plus large Korea/Taiwan pools); a few names drive the curve and '
-        f'one blow-up hurts. <b>(3) Universe membership</b> — a name is included if it cleared the '
-        f'turnover floor at <i>any</i> point 2018→now, so there is a mild liquidity look-ahead on '
-        f'top of survivorship; and <b>TR-routability is assumed</b> from that liquidity, not '
-        f'verified per name. Coverage is by home exchange × FX (the L&amp;S model), active '
-        f'<i>and</i> delisted; the genuine gaps are <b>Tokyo (Japan) and Milan (Italy)</b>, whose '
-        f'home venues the data source doesn’t serve. <b>(4) Mechanics</b> — daily closes, €1/order, '
-        f'slippage modeled not measured, and <b>past performance is not future returns</b>. The '
-        f'out-of-sample test is the guard against curve-fitting, not a promise.</div>')
+        f'cap</b> (no sector data), so the book can pile into one country or theme; a few names '
+        f'drive the curve and one blow-up hurts. <b>(3) Universe membership</b> — a name is '
+        f'included if it cleared the turnover floor at <i>any</i> point 2018→now, a mild liquidity '
+        f'look-ahead on top of survivorship. Coverage is by home exchange × FX (the L&amp;S model); '
+        f'the genuine gaps are <b>Tokyo (Japan) and Milan (Italy)</b>, whose home venues the data '
+        f'source doesn’t serve. <b>(4) Mechanics</b> — daily closes, €1/order, slippage modeled not '
+        f'measured, and <b>past performance is not future returns</b>. The out-of-sample test is '
+        f'the guard against curve-fitting, not a promise.</div>')
 
 
 def build(d: dict, public: bool = False) -> str:

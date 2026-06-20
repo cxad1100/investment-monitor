@@ -55,6 +55,8 @@ REBAL_LABEL = {"M": "monthly", "W": "weekly", "Q": "quarterly"}
 ROOT = Path(__file__).parent
 PRICES_CSV = ROOT / "data" / "universe" / "universe_prices.csv"
 META_CSV = ROOT / "data" / "universe" / "universe_meta.csv"
+# The universe is now TR-native (tools.tr_tradeable --enumerate → tools.build_tr_universe):
+# every live name is tradeable on TR by construction, so there is no separate tradeability filter.
 
 
 def _broker(t: str) -> str:
@@ -93,7 +95,7 @@ def gather(force: bool = False, refresh: bool | None = None, with_grid: bool = T
     prices = pd.read_csv(PRICES_CSV, index_col=0, parse_dates=True)
     prices = to_xetra_calendar(prices)                         # L&S/XETRA sessions only (tradeable days)
     prices = winsorize_prices(prices, cap=WINSOR_CAP)          # de-glitch the raw feed
-    meta_df = pd.read_csv(META_CSV)                            # universe is pre-filtered at build time
+    meta_df = pd.read_csv(META_CSV)                            # TR-native universe (already tradeable)
     meta = {r["ticker"]: dict(r) for _, r in meta_df.iterrows()}
     slip = {t: _slip(m) for t, m in meta.items() if t in prices.columns}
     pit = PITUniverse(prices, delisting_map(meta_df))

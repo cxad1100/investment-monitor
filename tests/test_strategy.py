@@ -23,7 +23,7 @@ def _fake_d():
                 train=_stats_slice(eq, tr, eq.index[0], te, 10_000.0),
                 val=_stats_slice(eq, tr, te + pd.Timedelta(days=1), ve, 10_000.0),
                 test=_stats_slice(eq, tr, ve + pd.Timedelta(days=1), eq.index[-1], 10_000.0),
-                n_dead=42, n_countries=1,
+                n_dead=42, n_countries=1, n_live=10,
                 significance=dict(
                     mc=dict(null_sharpe=np.array([0.1, 0.2, 0.3, 0.25]), strat_sharpe=0.6,
                             null_sharpe_median=0.22, p_sharpe=0.04, p_total=0.05, n_trials=1000),

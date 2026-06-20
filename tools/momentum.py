@@ -131,13 +131,13 @@ def to_xetra_calendar(prices: pd.DataFrame, min_prints: int = 20) -> pd.DataFram
     collapses the scored set to the 3–4 names that happened to print — the report showed
     rebalances of just 'QLTU TMRP MLSR ALTF' (Tel-Aviv names, untradeable here).
 
-    The XETRA calendar is derived from the universe's own XETRA-listed names: a `.XETRA`
-    stock prints only when XETRA is open, so days where a quorum (`min_prints`) of them
-    trade are exactly XETRA sessions. Aligning here means every rebalance and every
-    lookback lands on a real, tradeable European session, and the 252-row window is ≈ 12
-    true months (no Sundays eating into it)."""
-    xc = [c for c in prices.columns if c.endswith(".XETRA")]
-    if not xc:
+    The XETRA calendar is derived from the universe's own XETRA-listed names: a German
+    XETRA stock (yfinance `.DE`, e.g. SAP.DE; or the legacy EODHD `.XETRA`) prints only when
+    XETRA is open, so days where a quorum (`min_prints`) of them trade are exactly XETRA
+    sessions. Aligning here means every rebalance and every lookback lands on a real,
+    tradeable European session, and the 252-row window is ≈ 12 true months (no Sundays)."""
+    xc = [c for c in prices.columns if c.endswith(".DE") or c.endswith(".XETRA")]
+    if len(xc) < min_prints:
         return prices
     return prices.loc[prices[xc].notna().sum(axis=1) >= min_prints]
 
