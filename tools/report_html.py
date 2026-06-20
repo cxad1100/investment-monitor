@@ -31,18 +31,24 @@ def page(title: str, body: str) -> str:
 <style>{theme.REPORT_CSS}</style>
 </head><body><main>{body}</main>
 <script>
-// Plotly measures legend text width at first paint; if the webfont paints a beat
-// later the legend clip box is left one-char wide (truncated labels). Redraw once
-// fonts are ready (and after full load) so widths are remeasured.
+// Plotly sizes the legend box from text width at first paint. If that paint happens
+// while the container has no width (e.g. inside a not-yet-revealed iframe) or before
+// the font loads, the box is left one char wide and labels are clipped. Re-layout at
+// the real width on font-ready, load, parent reveal (resize), and any container resize.
 (function(){{
-  function redraw(){{
+  function fix(){{
     if(!window.Plotly) return;
     document.querySelectorAll('.js-plotly-plot').forEach(function(g){{
-      try{{ Plotly.redraw(g); }}catch(e){{}}
+      try{{ Plotly.Plots.resize(g); Plotly.relayout(g, {{}}); }}catch(e){{}}
     }});
   }}
-  if(document.fonts&&document.fonts.ready) document.fonts.ready.then(redraw);
-  window.addEventListener('load',function(){{ setTimeout(redraw,150); }});
+  if(document.fonts&&document.fonts.ready) document.fonts.ready.then(fix);
+  window.addEventListener('load',function(){{ setTimeout(fix,100); }});
+  window.addEventListener('resize',function(){{ setTimeout(fix,50); }});
+  if(window.ResizeObserver){{
+    var ro=new ResizeObserver(function(){{ fix(); }});
+    ro.observe(document.documentElement);
+  }}
 }})();
 </script>
 </body></html>"""

@@ -53,14 +53,20 @@ body{{background:#1e1e1e;color:#d4d4d4;margin:0;height:100vh;display:flex;flex-d
 .sp{{width:40px;height:40px;border:3px solid #2d2d2d;border-top-color:#569cd6;border-radius:50%;
  animation:s .8s linear infinite}}@keyframes s{{to{{transform:rotate(360deg)}}}}
 p{{color:#808080;font-size:14px;margin-top:16px}}
-iframe{{position:fixed;inset:0;width:100%;height:100%;border:0;display:none;background:#1e1e1e}}
+iframe{{position:fixed;inset:0;width:100%;height:100%;border:0;background:#1e1e1e;
+ opacity:0;pointer-events:none}}
 </style></head><body>
-<div class="sp" id="spin"></div><p id="msg">Loading…</p>
 <iframe id="f" src="{build_path}"></iframe>
+<div class="sp" id="spin"></div><p id="msg">Loading…</p>
 <script>
+// Render the iframe at full viewport width (opacity:0, NOT display:none) so Plotly
+// measures real widths while building — a display:none iframe has zero width and clips
+// every legend box to one char. Reveal + nudge a resize once the report has loaded.
 var f=document.getElementById('f');
 f.onload=function(){{document.getElementById('spin').style.display='none';
- document.getElementById('msg').style.display='none';f.style.display='block';}};
+ document.getElementById('msg').style.display='none';
+ f.style.opacity='1';f.style.pointerEvents='auto';
+ try{{f.contentWindow.dispatchEvent(new Event('resize'));}}catch(e){{}}}};
 f.onerror=function(){{document.getElementById('msg').textContent='Build failed — see terminal.';}};
 </script></body></html>"""
 

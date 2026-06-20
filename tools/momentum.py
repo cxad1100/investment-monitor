@@ -120,6 +120,28 @@ def trend_ok(benchmark: pd.Series, asof, ma: int = 200) -> bool:
     return float(s.iloc[-1]) >= float(s.iloc[-ma:].mean())
 
 
+def to_xetra_calendar(prices: pd.DataFrame, min_prints: int = 20) -> pd.DataFrame:
+    """Restrict the price frame to the XETRA (Lang & Schwarz) trading calendar.
+
+    Trade Republic fills via L&S, which trades on XETRA sessions: Mon–Fri minus German
+    holidays. The global price frame, by contrast, carries every exchange's calendar —
+    Israeli/Gulf venues trade Sun–Thu, and foreign markets stay open on German holidays.
+    Those non-XETRA sessions are days you *can't actually trade*, and they're thinly
+    populated, so an iloc lookback offset (or a month-end rebalance) landing on one
+    collapses the scored set to the 3–4 names that happened to print — the report showed
+    rebalances of just 'QLTU TMRP MLSR ALTF' (Tel-Aviv names, untradeable here).
+
+    The XETRA calendar is derived from the universe's own XETRA-listed names: a `.XETRA`
+    stock prints only when XETRA is open, so days where a quorum (`min_prints`) of them
+    trade are exactly XETRA sessions. Aligning here means every rebalance and every
+    lookback lands on a real, tradeable European session, and the 252-row window is ≈ 12
+    true months (no Sundays eating into it)."""
+    xc = [c for c in prices.columns if c.endswith(".XETRA")]
+    if not xc:
+        return prices
+    return prices.loc[prices[xc].notna().sum(axis=1) >= min_prints]
+
+
 def winsorize_prices(prices: pd.DataFrame, cap: float = 0.5) -> pd.DataFrame:
     """Rebuild a price frame with daily returns clipped to ±`cap`, recompounded from
     each column's first valid price. Kills split-adjustment glitches — a Frankfurt
@@ -226,6 +248,12 @@ def run_momentum(prices: pd.DataFrame, slippage_bps: dict, *, k: int = 15,
                     equity_val -= sum(fee_eur + slippage_bps[t] / 1e4 * (equity_val / len(prev))
                                       for t in prev) * mult
                 prev = set()
+                # Hold cash FLAT across the period: the account keeps its value and earns 0.
+                # Record a point each trading day so the equity curve plateaus — without this
+                # the kill-switch gap is left empty and the plot draws a straight diagonal
+                # across it (looks like data loss; a 2022-bear cash spell spanned ~6 months).
+                for day in prices.loc[ed:enxt].index:
+                    eq_points.append((day, equity_val))
                 continue
             w = equity_val / len(picks)                 # equal notional per name
             traded = (set(picks) ^ prev)                # enters + exits

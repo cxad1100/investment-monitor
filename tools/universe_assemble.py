@@ -1,18 +1,12 @@
-"""Assemble the survivorship-corrected momentum dataset: survivors ∪ resolved
-misses ∪ dead EUR names → one 9y price frame (dead columns truncated at death,
-NOT forward-filled past it) + one meta with a `delisting_date` column (NaT for
-survivors). This is what the momentum engine + PITUniverse consume.
+"""Pure helpers for the momentum dataset: union meta sources with a `delisting_date`
+column, outer-join price frames without resurrecting dead lines, and project the
+delisting map the momentum engine + PITUniverse consume.
 
-The CLI `main()` (wiring the live survivor fetch + FMP dead-price ingest) is added
-once the dead-price source lands; the pure assembly below is unit-tested now.
+The live universe is now built by `tools.build_market` (the single source of truth);
+the old yfinance/dead-price assembler CLI that lived here has been removed. The
+functions below stay because they're pure and unit-tested.
 """
-from pathlib import Path
-
 import pandas as pd
-
-ROOT = Path(__file__).resolve().parent.parent
-OUT_PRICES = ROOT / "data" / "momentum_prices.csv"
-OUT_META = ROOT / "data" / "momentum_meta.csv"
 
 _META_COLS = ["ticker", "name", "sector", "country", "currency",
               "slippage_bps", "local_id", "delisting_date"]
@@ -53,54 +47,3 @@ def delisting_map(meta: pd.DataFrame) -> dict:
     """meta → {ticker: Timestamp} for the dead names only (PITUniverse input)."""
     d = meta.dropna(subset=["delisting_date"])
     return {r.ticker: pd.Timestamp(r.delisting_date) for r in d.itertuples(index=False)}
-
-
-def fetch_survivors(tickers: list[str], years: int = 9, chunk: int = 200) -> pd.DataFrame:
-    """Robust chunked yfinance pull of adjusted closes. Keeps only the columns
-    yfinance actually returns (many .F lines won't resolve) — never KeyErrors on a
-    missing ticker, unlike pairs_universe.fetch_prices."""
-    import yfinance as yf
-    frames = []
-    for i in range(0, len(tickers), chunk):
-        raw = yf.download(tickers[i:i + chunk], period=f"{years}y",
-                          auto_adjust=True, progress=False)
-        close = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) and "Close" \
-            in raw.columns.get_level_values(0) else raw
-        frames.append(close)
-    out = pd.concat(frames, axis=1)
-    out = out.loc[:, ~out.columns.duplicated()]
-    if getattr(out.index, "tz", None) is not None:
-        out.index = out.index.tz_localize(None)
-    return out.dropna(how="all").ffill()
-
-
-def main(refresh: bool = False, include_misses: bool = False):
-    from tools.pairs_universe import _load_universe
-    from tools.dead_stocks import load_dead_prices, OUT_META as DEAD_META
-
-    surv_meta = pd.DataFrame([{"ticker": t, **m} for t, m in _load_universe().items()])
-    misses = []
-    if include_misses:
-        from tools.clean_misses import load_misses, resolve_misses
-        misses = resolve_misses(load_misses())
-        print(f"resolved misses: {len(misses)}")
-
-    dead_prices, _ = load_dead_prices()
-    dead_meta = pd.read_csv(DEAD_META) if DEAD_META.exists() else pd.DataFrame(columns=["ticker"])
-
-    meta = assemble_meta(surv_meta, misses, dead_meta)
-    alive = meta[meta["delisting_date"].isna()]["ticker"].tolist()
-    print(f"fetching {len(alive)} survivor histories (9y, yfinance, chunked)…")
-    surv_prices = fetch_survivors(alive)
-    prices = assemble_prices([surv_prices, dead_prices])
-
-    prices.to_csv(OUT_PRICES)
-    meta.to_csv(OUT_META, index=False)
-    print(f"assembled {meta.shape[0]} names ({dead_meta.shape[0]} dead, "
-          f"{surv_prices.shape[1]} live priced) · prices {prices.shape} "
-          f"{prices.index[0].date()}→{prices.index[-1].date()}")
-
-
-if __name__ == "__main__":
-    import sys
-    main(refresh="--refresh" in sys.argv, include_misses="--misses" in sys.argv)

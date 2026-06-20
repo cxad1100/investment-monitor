@@ -50,8 +50,6 @@ from tools.optimizer import (
     efficient_frontier,
     random_portfolios,
     portfolio_perf,
-    rolling_backtest,
-    equity_to_roi,
 )
 
 # ── Settings (one place) ──────────────────────────────────────────────────────
@@ -59,7 +57,6 @@ LOOKBACK_DAYS = 365      # window for the COVARIANCE estimate (the trustworthy i
 RF            = 0.045    # risk-free rate (annual)
 LONG_ONLY     = True
 MAX_W         = 0.35     # max single-position weight
-REB_FREQ      = "M"      # backtest rebalance frequency
 BL_DELTA      = 2.5      # Black-Litterman market risk-aversion (standard ≈ 2.5)
 BL_TAU        = 0.05     # Black-Litterman prior uncertainty scale
 # Optional subjective views for Black-Litterman. Empty = pure market-implied.
@@ -162,10 +159,6 @@ def gather(force: bool = False) -> dict:
     frontier = efficient_frontier(mean_bl, cov_ann, n_points=40, **kw)
     cloud = random_portfolios(mean_bl, cov_ann, n=2500, rf=RF)
 
-    backtest = rolling_backtest(hist[universe], lookback_days=LOOKBACK_DAYS,
-                                rebalance_freq=REB_FREQ, objective="sharpe",
-                                rf=RF, **kw)
-
     # YTD from ROI series
     ytd = None
     if not roi_series.empty:
@@ -185,7 +178,7 @@ def gather(force: bool = False) -> dict:
                 cur_perf=(cur_ret, cur_vol, cur_sharpe),
                 w_minvar=w_minvar, w_rp=w_rp, w_hrp=w_hrp,
                 w_bl_sharpe=w_bl_sharpe, w_bl_same=w_bl_same,
-                frontier=frontier, cloud=cloud, backtest=backtest, ytd=ytd,
+                frontier=frontier, cloud=cloud, ytd=ytd,
                 stale=stale, as_of=as_of)
 
 
@@ -424,9 +417,7 @@ def sec_frontier(d: dict) -> str:
     pt(d["w_bl_same"], "BL Same-Risk", "diamond", "#4ec9b0")
     fig.update_layout(height=470, xaxis_title="Volatility (annual %)",
                       yaxis_title="Expected return — Black-Litterman implied (annual %)",
-                      margin=dict(t=58),
-                      legend=dict(orientation="h", yanchor="bottom", y=1.02,
-                                  xanchor="left", x=0, font=dict(size=11)))
+                      margin=dict(t=20))
     return ("<h2>Efficient frontier</h2>"
             "<p class='dim'>Each grey dot is a random mix of your assets. The white line is the "
             "frontier — best return at every risk level. The vertical axis uses Black-Litterman "
@@ -455,9 +446,7 @@ def sec_roi(d: dict) -> str:
                              line=dict(color=BM_COLORS["Portfolio"], width=3.2)))
     fig.add_hline(y=0, line_dash="dash", line_color=theme.FG_DIM, line_width=1)
     fig.update_layout(height=485, yaxis=dict(title="Cumulative ROI (%)", ticksuffix="%"),
-                      hovermode="x unified", margin=dict(t=58),
-                      legend=dict(orientation="h", yanchor="bottom", y=1.02,
-                                  xanchor="left", x=0, font=dict(size=11)))
+                      hovermode="x unified", margin=dict(t=20))
     ranked = sorted([("Portfolio (you)", float(roi.iloc[-1]))] +
                     [(n, float(s.iloc[-1])) for n, s in bms.items() if not s.empty],
                     key=lambda x: -x[1])
@@ -470,7 +459,7 @@ def sec_roi(d: dict) -> str:
             "spent on a buy is simultaneously invested — virtually — into each benchmark on that same day. "
             "Whatever you put into Apple on a date, the Bitcoin line gets the same amount into BTC that day, and so on. "
             "Sale proceeds count as returned cash, so selling never looks like a loss. This is the honest "
-            "real-money comparison (unlike the hypothetical rolling backtest below).</p>"
+            "real-money comparison.</p>"
             f"<div class='chart'>{_fig_html(fig)}</div>{table}")
 
 
@@ -490,46 +479,6 @@ def sec_risk(d: dict) -> str:
     ]
     return "<h2>Risk &amp; efficiency</h2><div class='cards'>" + \
         "".join(_card(k, v) for k, v in items) + "</div>"
-
-
-def sec_backtest(d: dict) -> str:
-    bt = d["backtest"]
-    if not bt or not bt.get("equity"):
-        return ""
-    roi = {k: equity_to_roi(v) for k, v in bt["equity"].items()}
-    colors = {"Optimized": "#dcdcaa", "Equal-Weight": "#808080", "S&P 500": "#d16969"}
-    fig = go.Figure()
-    for name, s in roi.items():
-        fig.add_trace(go.Scatter(x=s.index, y=s.values, name=name,
-                                 line=dict(color=colors.get(name, "#aaa"),
-                                           width=2.4 if name == "Optimized" else 1.5)))
-    fig.add_hline(y=0, line_dash="dash", line_color=theme.FG_DIM)
-    fig.update_layout(height=425, yaxis=dict(title="Cumulative ROI (%)", ticksuffix="%"),
-                      hovermode="x unified", margin=dict(t=58),
-                      legend=dict(orientation="h", yanchor="bottom", y=1.02,
-                                  xanchor="left", x=0, font=dict(size=11)))
-
-    sp = roi.get("S&P 500")
-    rows = []
-    for name, s in roi.items():
-        m = compute_quant_metrics(s, sp if name != "S&P 500" else None)
-        if m:
-            rows.append(f"<tr><td>{name}</td><td class='num mono'>{float(s.iloc[-1]):+.1f}%</td>"
-                        f"<td class='num mono'>{m['cagr']:+.1f}%</td>"
-                        f"<td class='num mono'>{m['sharpe']:.2f}</td>"
-                        f"<td class='num mono'>{m['max_drawdown']:.1f}%</td>"
-                        f"<td class='num mono'>{m['var_95']:.2f}%</td></tr>")
-    table = ("<table><tr><th>Strategy</th><th class='num'>Total</th><th class='num'>CAGR</th>"
-             "<th class='num'>Sharpe</th><th class='num'>Max DD</th><th class='num'>VaR 95</th></tr>"
-             + "".join(rows) + "</table>")
-    return (f"<h2>Rolling backtest (out-of-sample, since {bt['start']})</h2>"
-            "<p class='dim'>Every month the optimizer re-estimates from the trailing year "
-            "(strictly before the rebalance date — no look-ahead) and re-weights; the weights are "
-            "then held out-of-sample. Equal-weight is the no-skill baseline on the same assets.</p>"
-            f"<div class='chart'>{_fig_html(fig)}</div>{table}"
-            "<div class='note warn'><b>Selection-bias caveat</b> — this universe is your "
-            "<i>current</i> holdings, i.e. assets that already did well enough for you to own them "
-            "today. The fair comparison is Optimized vs Equal-Weight, not vs the index.</div>")
 
 
 def sec_positions(d: dict, public: bool) -> str:
@@ -673,7 +622,6 @@ def build(d: dict, public: bool) -> str:
         sec_correlation(d),
         sec_frontier(d),
         sec_weights_now(d, public),
-        sec_backtest(d),
         sec_explainer(),
     ])
     return page(title, body)

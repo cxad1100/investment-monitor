@@ -21,13 +21,14 @@ import plotly.graph_objects as go
 
 from tools import theme
 from tools.report_html import fig_html, pct as _pct, card as _card, page
-from tools.momentum import run_momentum, benchmark_curves, equal_weight_curve, winsorize_prices
+from tools.momentum import (run_momentum, benchmark_curves, equal_weight_curve,
+                            winsorize_prices, to_xetra_calendar)
 from tools.pairs_universe import UNIVERSE, fetch_prices
 from tools.portfolio_tools import BENCHMARKS
 from tools.data_buffer import cached_price_history
 from tools.universe_pit import PITUniverse
 from tools.universe_assemble import delisting_map
-from tools.momentum_grid import run_grid, feasibility
+from tools.momentum_grid import run_grid, feasibility, ALL_CONFIGS
 
 # ── Settings (one place) ──────────────────────────────────────────────────────
 K            = 15
@@ -52,8 +53,8 @@ COST_MULTS   = (0.0, 1.0, 2.0)
 REBAL_LABEL = {"M": "monthly", "W": "weekly", "Q": "quarterly"}
 
 ROOT = Path(__file__).parent
-PRICES_CSV = ROOT / "data" / "momentum_prices.csv"
-META_CSV = ROOT / "data" / "momentum_meta.csv"
+PRICES_CSV = ROOT / "data" / "universe" / "universe_prices.csv"
+META_CSV = ROOT / "data" / "universe" / "universe_meta.csv"
 
 
 def _broker(t: str) -> str:
@@ -86,20 +87,14 @@ def _slip(m) -> int:
 
 def gather(force: bool = False, refresh: bool | None = None, with_grid: bool = True) -> dict:
     """Load the survivorship-corrected dataset (survivors ∪ 270 dead), run the
-    walk-forward with the active graveyard, and (when `with_grid`) the 64-permutation
+    walk-forward with the active graveyard, and (when `with_grid`) the 32-config
     matrix. `force`/`refresh` only re-fetch the benchmark series."""
     refresh = force if refresh is None else refresh
     prices = pd.read_csv(PRICES_CSV, index_col=0, parse_dates=True)
+    prices = to_xetra_calendar(prices)                         # L&S/XETRA sessions only (tradeable days)
     prices = winsorize_prices(prices, cap=WINSOR_CAP)          # de-glitch the raw feed
-    meta_df = pd.read_csv(META_CSV)
-    if "med_turnover" in meta_df.columns:                      # liquidity band (drops dead .F feeds + glitch turnover)
-        tn = meta_df["med_turnover"]
-        liquid = ((tn >= MIN_TURNOVER) & (tn <= MAX_TURNOVER)) | meta_df["delisting_date"].notna()
-        meta_df = meta_df[liquid].reset_index(drop=True)
-        prices = prices[[c for c in prices.columns if c in set(meta_df["ticker"])]]
+    meta_df = pd.read_csv(META_CSV)                            # universe is pre-filtered at build time
     meta = {r["ticker"]: dict(r) for _, r in meta_df.iterrows()}
-    sectors = {t: (str(m["sector"]) if pd.notna(m.get("sector")) else "Unknown")
-               for t, m in meta.items()}
     slip = {t: _slip(m) for t, m in meta.items() if t in prices.columns}
     pit = PITUniverse(prices, delisting_map(meta_df))
 
@@ -109,16 +104,19 @@ def gather(force: bool = False, refresh: bool | None = None, with_grid: bool = T
     bench = bench_raw.rename(columns={tk: name for name, (tk, _) in benches.items()})
     spx = bench["S&P 500"] if "S&P 500" in bench.columns else bench.iloc[:, 0]
 
+    # No sector data on the global universe → sector-neutral (B) configs excluded from the grid.
     res = run_momentum(prices, slip, k=K, lookback=LOOKBACK, skip=SKIP, capital=CAPITAL,
                        cost_mults=COST_MULTS, freq=REBAL, liq_max=LIQ_MAX, fee_eur=FEE_EUR,
                        min_price=MIN_PRICE, start=START, pit=pit, execute_lag=EXEC_LAG)
-    grid = (run_grid(prices, slip, sectors=sectors, benchmark=spx, pit=pit, start=START,
+    grid = (run_grid(prices, slip, sectors=None, benchmark=spx, pit=pit, start=START,
+                     configs=[c for c in ALL_CONFIGS if not c.sector_neutral],
                      train_end=TRAIN_END, val_end=VAL_END, capital=CAPITAL,
                      lookback=LOOKBACK, skip=SKIP, execute_lag=EXEC_LAG)
             if with_grid else None)
 
     return dict(prices=prices, res=res, benchmarks=bench, capital=CAPITAL, meta=meta,
-                grid=grid, n_dead=int(meta_df["delisting_date"].notna().sum()))
+                grid=grid, n_dead=int(meta_df["delisting_date"].notna().sum()),
+                n_countries=len({m.get("country") for m in meta.values()} - {"—", None}))
 
 
 def _equity_window(res: dict):
@@ -204,9 +202,7 @@ def sec_curve(d: dict) -> str:
 
     fig.add_hline(y=100, line_dash="dash", line_color=theme.FG_DIM, line_width=1)
     fig.update_layout(height=460, yaxis_title="Index (start = 100)",
-                      hovermode="x unified", margin=dict(t=58),
-                      legend=dict(orientation="h", yanchor="bottom", y=1.02,
-                                  xanchor="left", x=0, font=dict(size=11)))
+                      hovermode="x unified", margin=dict(t=20))
     out.append(f"<div class='chart'>{fig_html(fig)}</div>")
     return "".join(out)
 
@@ -263,7 +259,8 @@ def sec_rebalance_log(d: dict) -> str:
            + "".join(rows) + "</table></details>")
 
 
-def sec_caveat() -> str:
+def sec_caveat(d: dict) -> str:
+    nc = d.get("n_countries", 0)
     return f"""
 <div class="note warn">
 <b>Read the result as relative, not absolute — but not because of survivorship.</b>
@@ -271,11 +268,13 @@ The universe is survivorship-<i>corrected</i> (delisted/collapsed names are carr
 liquidated by the graveyard, below), and momentum barely feels it anyway: it buys
 <i>winners</i>, so it almost never holds a name into its death. The real reasons the
 headline is optimistic are <b>regime</b> (2023→ was an exceptional momentum tape) and
-<b>concentration</b> (a top-k that a few explosive names dominate). The universe is the
-liquid, <b>Trade-Republic-investable</b> set across 18 countries, each priced off its
-<b>home exchange × FX</b> (the Lang &amp; Schwarz model — Seagate on NASDAQ, not the dead
-Frankfurt-floor .F shadow), behind a ≥100k/day turnover floor. Daily closes only — intraday
-execution and borrow costs (for any future short overlay) are ignored.
+<b>concentration</b> (a top-k that a few explosive names dominate, with no sector or
+geographic cap). The universe is the liquid, <b>Trade-Republic-investable</b> set across
+{nc} countries, each priced off its <b>home exchange × EUR FX</b> (the Lang &amp; Schwarz
+model — NVIDIA on NASDAQ, Samsung on KRX, in their own currency converted to EUR), behind a
+≥100k/day turnover floor. Membership uses peak turnover over the whole window, so there is a
+mild liquidity look-ahead, and TR-routability is assumed from liquidity, not verified. Daily
+closes only — intraday execution and borrow costs (for any future short overlay) are ignored.
 </div>"""
 
 
@@ -338,9 +337,10 @@ def sec_grid(d: dict) -> str:
             f"{test_cells}"
             f"<td class='num mono'>{c['trades_per_year']:.0f}</td></tr>")
     test_hdr = "<th class='num'>Test ret</th><th class='num'>Test Sh</th>" if has_test else ""
-    return ("<h2>64-permutation grid (A·B·C·D·E·F)</h2>"
-            "<p class='dim'>A vol-adj · B sector-neutral · C trend-filter · D 10-slot · "
-            "E quarterly · F lazy. Ranked by <b>validation</b> Sharpe; train = 2018–21 "
+    return ("<h2>32-config grid (A·C·D·E·F)</h2>"
+            "<p class='dim'>A vol-adj · C trend-filter · D 10-slot · E quarterly · F lazy "
+            "(B sector-neutral is excluded — no sector data on this universe). Ranked by "
+            "<b>validation</b> Sharpe; train = 2018–21 "
             "(picks the config), validation = 2022–23, <b>test = 2024→ (held out, never "
             "informs the pick)</b>. A config you'd trust holds up across all three — "
             "especially test.</p>"
@@ -420,7 +420,7 @@ def build(d: dict, public: bool = False) -> str:
         sec_curve(d),
         sec_stats(d, public),
         sec_rebalance_log(d),
-        sec_caveat(),
+        sec_caveat(d),
         sec_survivorship(d) if not public else "",
         sec_grid(d) if not public else "",
         sec_feasibility(d) if not public else "",

@@ -23,7 +23,15 @@ def _fake_d():
                 train=_stats_slice(eq, tr, eq.index[0], te, 10_000.0),
                 val=_stats_slice(eq, tr, te + pd.Timedelta(days=1), ve, 10_000.0),
                 test=_stats_slice(eq, tr, ve + pd.Timedelta(days=1), eq.index[-1], 10_000.0),
-                n_dead=42)
+                n_dead=42, n_countries=1,
+                significance=dict(
+                    mc=dict(null_sharpe=np.array([0.1, 0.2, 0.3, 0.25]), strat_sharpe=0.6,
+                            null_sharpe_median=0.22, p_sharpe=0.04, p_total=0.05, n_trials=1000),
+                    dsr=dict(dsr=0.78, n_trials=32, T=20, sr_benchmark_annual=1.1,
+                             sharpe_annual=1.4),
+                    ci=dict(conf=95, sharpe=1.2, sharpe_lo=0.4, sharpe_hi=1.9,
+                            cagr=0.3, cagr_lo=0.1, cagr_hi=0.5),
+                    ppy=4.0))
 
 
 def test_strategy_page_builds():
