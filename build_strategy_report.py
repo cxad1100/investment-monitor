@@ -18,7 +18,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from tools.report_html import pct as _pct, card as _card, page, fig_html
-from tools import theme, significance as sig
+from tools import theme, significance as sig, quant_grade as qg
 from tools.momentum import (run_momentum, winsorize_prices, to_xetra_calendar,
                             precompute_eligibility)
 from tools.universe_pit import PITUniverse
@@ -131,8 +131,20 @@ def gather(force: bool = False, refresh: bool | None = None) -> dict:
     dsr = sig.deflated_sharpe_ratio(strat_rets, [c["full"]["sharpe"] for c in grid["cells"]], ppy=ppy)
     ci = sig.bootstrap_sharpe_cagr_ci(strat_rets, ppy=ppy, seed=0)
 
+    # ── Quant scorecard: industry metrics + an honest letter grade ──
+    years = max((eq.index[-1] - eq.index[0]).days / 365.25, 1e-9)
+    li = {str(r["isin"]) for i, (r, dl) in enumerate(zip(meta_df.to_dict("records"),
+          meta_df["delisting_date"])) if pd.isna(dl) and str(r["isin"])}
+    di = {str(r["isin"]) for r, dl in zip(meta_df.to_dict("records"), meta_df["delisting_date"])
+          if pd.notna(dl) and str(r["isin"])}
+    overlap = len(li & di) / max(len(di), 1)
+    quant = dict(perf=qg.perf_metrics(eq), bench=qg.vs_benchmark(eq, spx),
+                 trades=qg.trade_metrics(tr, CAPITAL, years), roll=qg.rolling_sharpe(eq),
+                 grade=qg.grade(test["sharpe"], dsr["dsr"], mc["p_sharpe"], overlap),
+                 isin_overlap=overlap)
+
     n_countries = len({m.get("country") for m in meta.values()} - {"—", None})
-    return dict(prices=prices, res=res, benchmarks=bench, capital=CAPITAL, meta=meta,
+    return dict(prices=prices, res=res, benchmarks=bench, capital=CAPITAL, meta=meta, quant=quant,
                 strategy=STRATEGY, train=train, val=val, test=test, graveyard_hits=hits,
                 grid=grid, n_dead=int(meta_df["delisting_date"].notna().sum()),
                 n_countries=n_countries,
@@ -226,6 +238,63 @@ def sec_yearly(d: dict, public: bool) -> str:
             "<th class='num'>S&amp;P 500</th></tr>" + "".join(rows) + "</table>")
 
 
+def sec_grade(d: dict, public: bool) -> str:
+    q = d["quant"]
+    p, bm, tm, rl, g = q["perf"], q["bench"], q["trades"], q["roll"], q["grade"]
+    gcolor = {"A": "#46c84e", "B": "#9acd32", "C": "#d7ba7d", "D": "#e8a04e", "F": "#ef4444"}[g["letter"]]
+
+    def row(k, v):
+        return f"<tr><td>{k}</td><td class='num mono'>{v}</td></tr>"
+    perf_rows = "".join([
+        row("Sharpe (full, daily)", f"{p['sharpe']:.2f}"), row("Sortino", f"{p['sortino']:.2f}"),
+        row("Calmar (CAGR/maxDD)", f"{p['calmar']:.2f}"), row("Omega", f"{p['omega']:.2f}"),
+        row("Ann. return", _pct(p['ann_return']*100)), row("Ann. vol", _pct(p['ann_vol']*100)),
+        row("Max drawdown", _pct(p['max_dd']*100)), row("Underwater (days)", f"{p['dd_days']}"),
+        row("Skew / kurtosis", f"{p['skew']:.2f} / {p['kurtosis']:.2f}"),
+        row("VaR 95 / CVaR 95 (daily)", f"{p['var95']*100:.1f}% / {p['cvar95']*100:.1f}%")])
+    bench_rows = "".join([
+        row("Beta vs S&amp;P", f"{bm['beta']:.2f}"), row("Alpha (annual)", _pct(bm['alpha_ann']*100)),
+        row("Correlation", f"{bm['corr']:.2f}"), row("Information ratio", f"{bm['info_ratio']:.2f}"),
+        row("Tracking error", _pct(bm['tracking_error']*100)),
+        row("Up / down capture", f"{bm['up_capture']:.2f} / {bm['down_capture']:.2f}")]) if bm else ""
+    trade_rows = "".join([
+        row("Hit rate", _pct(tm['hit_rate']*100)), row("Profit factor", f"{tm['profit_factor']:.2f}"),
+        row("Payoff (avgW/avgL)", f"{tm['payoff']:.2f}"), row("Trades / year", f"{tm['trades_per_year']:.0f}")]) if tm else ""
+    roll_rows = "".join([
+        row("12m Sharpe — median", f"{rl['roll_sharpe_med']:.2f}"),
+        row("12m Sharpe — worst", f"{rl['roll_sharpe_min']:.2f}"),
+        row("12m windows positive", _pct(rl['roll_sharpe_pos_frac']*100))]) if rl else ""
+
+    flags = "".join(f"<li>{f}</li>" for f in g["flags"])
+    score_card = _card("Score / 100", f"{g['score']:.0f}")
+    sharpe_card = _card("Full Sharpe", f"{p['sharpe']:.2f}")
+    dd_card = _card("Max DD", _pct(p["max_dd"] * 100))
+    return (
+        "<h2>Quant scorecard &amp; honest grade</h2>"
+        f"<div class='cards'>"
+        f"<div class='card'><div class='k'>Grade</div>"
+        f"<div class='v' style='color:{gcolor};font-size:2rem'>{g['letter']}</div></div>"
+        f"{score_card}{sharpe_card}{dd_card}</div>"
+        "<p class='dim'>Graded like a risk committee: standard ratios, benchmark attribution, "
+        "trade quality and stability — then the headline is <b>docked for what it doesn't "
+        "correct</b>. The full-window daily Sharpe (<b>"
+        f"{p['sharpe']:.2f}</b>) and the −{abs(p['max_dd'])*100:.0f}% max drawdown are the sober "
+        "view; the eye-popping test total is regime + survivorship.</p>"
+        "<div style='display:flex;flex-wrap:wrap;gap:1.5rem'>"
+        f"<table><tr><th>Risk / return</th><th class='num'>Value</th></tr>{perf_rows}</table>"
+        f"<table><tr><th>vs S&amp;P 500</th><th class='num'>Value</th></tr>{bench_rows}</table>"
+        f"<table><tr><th>Trade quality</th><th class='num'>Value</th></tr>{trade_rows}</table>"
+        f"<table><tr><th>Stability</th><th class='num'>Value</th></tr>{roll_rows}</table>"
+        "</div>"
+        "<div class='note warn'><b>Bias audit — why this is <i>not</i> clean alpha.</b> "
+        f"Is it real? Partly. Momentum-<i>selection</i> beats a random book on the same universe "
+        f"(p={d['significance']['mc']['p_sharpe']:.3f}, deflated-Sharpe "
+        f"{d['significance']['dsr']['dsr']:.0%}) — a genuine, modest tilt. But the <i>level</i> is "
+        f"inflated, and the honest verdict is a <b>{g['letter']}</b>:<ul>{flags}</ul>"
+        "Bottom line: a real but small momentum tilt riding survivorship + a small-cap regime — "
+        "a known, decaying premium, not novel alpha. If it looks too easy, it is.</div>")
+
+
 def sec_significance(d: dict, public: bool) -> str:
     s = d["significance"]
     mc, dsr, ci = s["mc"], s["dsr"], s["ci"]
@@ -306,12 +375,10 @@ def sec_caveat(d: dict) -> str:
     bound_txt = ""
     if b:
         bound_txt = (
-            f' <b>Lower vs upper bound.</b> The held-out test return is <b>{b["lower_full"]*100:+.1f}%</b> '
-            f'keeping <i>all</i> {d["n_dead"]} corpses (lower bound) vs <b>{b["upper_test"]*100:+.1f}%</b> '
-            f'after dropping the <b>{b["n_dead_dropped"]}</b> dead names whose ISIN domicile TR never '
-            f'lists (the 200 Korean + a few — never tradeable, so never a real loss; upper bound). '
-            f'They are <b>all but identical</b>: the tradeability of the graveyard is immaterial, because '
-            f'momentum holds ~0 corpses regardless of which are in it.')
+            f' Trimming the {b["n_dead_dropped"]} never-TR-tradeable corpses (the 200 Korean + a few) '
+            f'moves the held-out test from <b>{b["lower_full"]*100:+.1f}%</b> to '
+            f'<b>{b["upper_test"]*100:+.1f}%</b> — all but identical, but for the <i>wrong</i> reason: '
+            f'the graveyard barely overlaps the live universe, so it isn’t correcting anything.')
     trade = (
         f' <b>Tradeability is built in, not assumed.</b> The {nlive:,} live names are TR’s own '
         f'instrument list — <i>enumerated</i> from a Trade Republic account and priced at their '
@@ -319,25 +386,22 @@ def sec_caveat(d: dict) -> str:
         f'buy (a few TR lists but restricts in your region may slip in). The {d["n_dead"]} delisted '
         f'names are the survivorship graveyard; we report the all-corpses result as the conservative '
         f'<b>lower bound</b>.{bound_txt}')
+    ov = d.get("quant", {}).get("isin_overlap", 0.0)
     return (
-        f'<div class="note"><b>What’s honest here — and what isn’t the problem.</b> '
-        f'<b>Survivorship is corrected.</b> The universe carries {d["n_dead"]} names that '
-        f'delisted/collapsed 2018→now, and {surv}: momentum buys <i>winners</i>, and a dying name '
-        f'ranks last long before it goes, so it almost never owns the corpses — the headline is '
-        f'not a survivorship artifact.{trade} <b>Capacity</b> — every name clears a '
-        f'<b>≥100k/day turnover floor</b>, so a small account deploys without moving a price.'
-        f'<br><br>The real caveats: <b>(1) Regime</b> — 2024→ was an exceptional momentum '
-        f'tape (defence + AI: Rheinmetall, Siemens Energy, Palantir); even the held-out '
-        f'{test_ret:+.0f}% test figure is regime-specific and will <b>not</b> repeat. '
-        f'<b>(2) Concentration</b> — top-{d["strategy"].slots}, with <b>no sector or geographic '
-        f'cap</b> (no sector data), so the book can pile into one country or theme; a few names '
-        f'drive the curve and one blow-up hurts. <b>(3) Universe membership</b> — a name is '
-        f'included if it cleared the turnover floor at <i>any</i> point 2018→now, a mild liquidity '
-        f'look-ahead on top of survivorship. Coverage is by home exchange × FX (the L&amp;S model); '
-        f'the genuine gaps are <b>Tokyo (Japan) and Milan (Italy)</b>, whose home venues the data '
-        f'source doesn’t serve. <b>(4) Mechanics</b> — daily closes, €1/order, slippage modeled not '
-        f'measured, and <b>past performance is not future returns</b>. The out-of-sample test is '
-        f'the guard against curve-fitting, not a promise.</div>')
+        f'<div class="note warn"><b>The dominant caveat — survivorship is NOT corrected.</b> '
+        f'The live universe is Trade Republic’s <i>current</i> list — names that <b>survived to '
+        f'today</b>. A name that pumped then delisted before now is simply absent, so the backtest '
+        f'only ever picks from winners-that-made-it. The {d["n_dead"]} “graveyard” names are a '
+        f'near-disjoint EODHD relic (<b>{ov*100:.0f}%</b> ISIN overlap with the live set), so they '
+        f'do <b>not</b> fix it.{bound_txt} This inflates the headline and is the single biggest reason '
+        f'to distrust the level — see the bias audit in the scorecard above.{trade}'
+        f'<br><br>The other caveats: <b>(1) Regime</b> — 2024→ was an exceptional small-cap momentum '
+        f'tape; even the held-out {test_ret:+.0f}% test figure is regime-specific and will <b>not</b> '
+        f'repeat. <b>(2) Concentration</b> — top-{d["strategy"].slots}, no sector/geographic cap, so '
+        f'the book can pile into one theme; a few names drive the curve. <b>(3) Capacity</b> — picks '
+        f'are liquid enough for a small account, but modeled slippage (25bps) understates real fills '
+        f'in size. <b>(4) Mechanics</b> — daily closes, €1/order, slippage modeled not measured, and '
+        f'<b>past performance is not future returns</b>.</div>')
 
 
 def build(d: dict, public: bool = False) -> str:
@@ -354,6 +418,7 @@ def build(d: dict, public: bool = False) -> str:
         sec_holdings(d),
         sec_curve(d),
         sec_perf(d, public),
+        sec_grade(d, public),
         sec_significance(d, public),
         sec_yearly(d, public),
         sec_timeline(d),

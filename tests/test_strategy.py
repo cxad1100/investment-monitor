@@ -31,7 +31,20 @@ def _fake_d():
                              sharpe_annual=1.4),
                     ci=dict(conf=95, sharpe=1.2, sharpe_lo=0.4, sharpe_hi=1.9,
                             cagr=0.3, cagr_lo=0.1, cagr_hi=0.5),
-                    ppy=4.0))
+                    ppy=4.0),
+                quant=dict(
+                    perf=dict(sharpe=0.84, sortino=1.13, calmar=0.61, omega=1.17, ann_return=0.27,
+                              ann_vol=0.32, max_dd=-0.44, dd_days=404, skew=-0.39, kurtosis=2.89,
+                              var95=-0.03, cvar95=-0.05, worst_day=-0.13, best_day=0.09),
+                    bench=dict(beta=0.82, alpha_ann=0.15, corr=0.43, tracking_error=0.29,
+                               info_ratio=0.42, up_capture=0.85, down_capture=0.67),
+                    trades=dict(n_trades=495, trades_per_year=60.0, hit_rate=0.53,
+                                profit_factor=1.81, avg_win=528.0, avg_loss=-335.0, payoff=1.58),
+                    roll=dict(roll_sharpe_min=-2.05, roll_sharpe_med=0.88, roll_sharpe_pos_frac=0.86),
+                    grade=dict(score=62.2, letter="C", survivorship_corrected=False,
+                               flags=["Survivorship NOT corrected.", "Regime.", "Multiple testing.",
+                                      "Known decaying anomaly."]),
+                    isin_overlap=0.02))
 
 
 def test_strategy_page_builds():
