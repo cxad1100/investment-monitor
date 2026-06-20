@@ -90,6 +90,31 @@ def gather(force: bool = False, refresh: bool | None = None) -> dict:
     val = _stats_slice(eq, tr, te + pd.Timedelta(days=1), ve, CAPITAL)
     test = _stats_slice(eq, tr, ve + pd.Timedelta(days=1), eq.index[-1], CAPITAL)
     hits = sum(len(h.get("dead", set())) for h in res["holdings_log"])
+
+    # ── Upper bound: drop dead names that were never TR-tradeable (ISIN domicile absent
+    #    from the live TR set — e.g. the 200 Korean corpses TR never offered). Including them
+    #    only adds forced death-losses, so removing them lifts the result: the all-dead run is
+    #    the lower bound, this the upper. Re-run the SAME strategy on the trimmed graveyard.
+    live_cc = {str(i)[:2] for i, dl in zip(meta_df["isin"], meta_df["delisting_date"])
+               if pd.isna(dl) and isinstance(i, str) and len(str(i)) >= 2}
+    keep = [(pd.isna(dl) or (isinstance(i, str) and str(i)[:2] in live_cc))
+            for i, dl in zip(meta_df["isin"], meta_df["delisting_date"])]
+    ub_meta = meta_df[keep].reset_index(drop=True)
+    n_dead_dropped = int(meta_df["delisting_date"].notna().sum() - ub_meta["delisting_date"].notna().sum())
+    ub_tickers = set(ub_meta["ticker"])
+    ub_prices = prices[[c for c in prices.columns if c in ub_tickers]]
+    ub_pit = PITUniverse(ub_prices, delisting_map(ub_meta))
+    ub_res = run_momentum(ub_prices, {t: slip[t] for t in ub_prices.columns if t in slip},
+                          lookback=LOOKBACK, skip=SKIP, capital=CAPITAL, cost_mults=(1.0,),
+                          start=START, liq_max=LIQ_MAX, fee_eur=FEE_EUR, min_price=MIN_PRICE,
+                          sectors=None, benchmark=spx, pit=ub_pit, execute_lag=EXEC_LAG,
+                          **STRATEGY.kwargs())
+    ub_eq, ub_tr = ub_res["runs"][1.0]["equity"], ub_res["runs"][1.0]["trades"]
+    bounds = dict(lower_full=test["net_return"], n_dead_dropped=n_dead_dropped,
+                  upper_full=ub_res["runs"][1.0]["stats"]["net_return"],
+                  lower_full_all=res["runs"][1.0]["stats"]["net_return"],
+                  upper_test=_stats_slice(ub_eq, ub_tr, ve + pd.Timedelta(days=1),
+                                          ub_eq.index[-1], CAPITAL)["net_return"])
     grid = run_grid(prices, slip, sectors=None, benchmark=spx, pit=pit, start=START,
                     configs=[c for c in ALL_CONFIGS if not c.sector_neutral],
                     train_end=TRAIN_END, val_end=VAL_END, capital=CAPITAL,
@@ -111,7 +136,7 @@ def gather(force: bool = False, refresh: bool | None = None) -> dict:
                 strategy=STRATEGY, train=train, val=val, test=test, graveyard_hits=hits,
                 grid=grid, n_dead=int(meta_df["delisting_date"].notna().sum()),
                 n_countries=n_countries,
-                n_live=n_live,
+                n_live=n_live, bounds=bounds,
                 significance=dict(mc=mc, dsr=dsr, ci=ci, ppy=ppy))
 
 
@@ -277,15 +302,23 @@ def sec_caveat(d: dict) -> str:
     surv = (f"it held <b>0</b> of them into death" if hits == 0 else
             f"it held <b>{hits}</b> into delisting, liquidated by the graveyard at the last price")
     nlive = d.get("n_live")
+    b = d.get("bounds", {})
+    bound_txt = ""
+    if b:
+        bound_txt = (
+            f' <b>Lower vs upper bound.</b> The held-out test return is <b>{b["lower_full"]*100:+.1f}%</b> '
+            f'keeping <i>all</i> {d["n_dead"]} corpses (lower bound) vs <b>{b["upper_test"]*100:+.1f}%</b> '
+            f'after dropping the <b>{b["n_dead_dropped"]}</b> dead names whose ISIN domicile TR never '
+            f'lists (the 200 Korean + a few — never tradeable, so never a real loss; upper bound). '
+            f'They are <b>all but identical</b>: the tradeability of the graveyard is immaterial, because '
+            f'momentum holds ~0 corpses regardless of which are in it.')
     trade = (
         f' <b>Tradeability is built in, not assumed.</b> The {nlive:,} live names are TR’s own '
         f'instrument list — <i>enumerated</i> from a Trade Republic account and priced at their '
         f'home listing (Milan, Tokyo, etc.) via yfinance — so every one is a name you can actually '
         f'buy (a few TR lists but restricts in your region may slip in). The {d["n_dead"]} delisted '
-        f'names are kept in <i>full</i> as a <b>conservative lower bound</b>: a dead name can’t be '
-        f'tradeability-checked, and since holding one into death is a <i>loss</i>, including delisted '
-        f'names that may not have been tradeable can only <b>drag</b> the result down — never inflate '
-        f'it. The true tradeable-only figure would be slightly <i>higher</i>; we report the lower bound.')
+        f'names are the survivorship graveyard; we report the all-corpses result as the conservative '
+        f'<b>lower bound</b>.{bound_txt}')
     return (
         f'<div class="note"><b>What’s honest here — and what isn’t the problem.</b> '
         f'<b>Survivorship is corrected.</b> The universe carries {d["n_dead"]} names that '

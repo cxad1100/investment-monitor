@@ -26,8 +26,11 @@ CC_NAME = {
     "CH": "Switzerland", "SE": "Sweden", "FI": "Finland", "NO": "Norway",
     "DK": "Denmark", "IE": "Ireland", "CA": "Canada", "HK": "Hong Kong",
     "AU": "Australia", "KR": "South Korea", "TW": "Taiwan", "IL": "Israel",
-    "PL": "Poland", "JP": "Japan", "IT": "Italy",
-    "BM": "Bermuda", "KY": "Cayman", "JE": "Jersey", "LU": "Luxembourg",
+    "PL": "Poland", "JP": "Japan", "IT": "Italy", "CN": "China", "SG": "Singapore",
+    "NZ": "New Zealand", "ZA": "South Africa", "NG": "Nigeria", "MT": "Malta",
+    "BM": "Bermuda", "KY": "Cayman", "JE": "Jersey", "LU": "Luxembourg", "GG": "Guernsey",
+    "VG": "Br. Virgin Is.", "MH": "Marshall Is.", "PA": "Panama", "LR": "Liberia",
+    "FO": "Faroe Is.", "PR": "Puerto Rico", "AN": "Neth. Antilles",
 }
 
 TURN_FLOOR = 100_000.0        # €/day median turnover — the liquidity gate
