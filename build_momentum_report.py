@@ -11,26 +11,41 @@ caveat stays.
 """
 
 import argparse
+import re
 import webbrowser
 from datetime import datetime
 from pathlib import Path
 
+import pandas as pd
 import plotly.graph_objects as go
 
 from tools import theme
 from tools.report_html import fig_html, pct as _pct, card as _card, page
-from tools.momentum import run_momentum, benchmark_curves, equal_weight_curve
+from tools.momentum import (run_momentum, benchmark_curves, equal_weight_curve,
+                            winsorize_prices, to_xetra_calendar)
 from tools.pairs_universe import UNIVERSE, fetch_prices
 from tools.portfolio_tools import BENCHMARKS
 from tools.data_buffer import cached_price_history
+from tools.universe_pit import PITUniverse
+from tools.universe_assemble import delisting_map
+from tools.momentum_grid import run_grid, feasibility, ALL_CONFIGS
 
 # ── Settings (one place) ──────────────────────────────────────────────────────
 K            = 15
 LOOKBACK     = 252
 SKIP         = 21
 REBAL        = "M"
+START        = "2018-01-01"   # first rebalance (MiFID era); full 9y survivorship-corrected window
+TRAIN_END    = "2021-12-31"   # train ≤ this (in-sample, used to choose the config)
+VAL_END      = "2023-12-31"   # validation = train_end→here; test = after (never informs the pick)
 LIQ_MAX      = 30
 MIN_PRICE    = 1.0        # drop sub-€1 penny listings (12-1 momentum = tick noise there)
+MIN_TURNOVER = 100_000    # €/day median turnover floor — drops thin/ghost listings whose
+                          #   German-exchange feed is stale/broken (Aker BP ARC.F €0/day,
+                          #   Seagate 847.F €893/day) and only the real prices survive
+MAX_TURNOVER = 50_000_000_000   # €/day ceiling — no real stock clears €50B/day; above = glitch
+WINSOR_CAP   = 0.5        # clip daily returns ±50% — kills split-adjustment glitches
+EXEC_LAG     = 1          # trade t+1 (next bar after the signal), not the signal-day close
 CAPITAL      = 10_000.0   # paper account, EUR
 FEE_EUR      = 1.0        # Trade Republic per-order fee
 COST_MULTS   = (0.0, 1.0, 2.0)
@@ -38,6 +53,10 @@ COST_MULTS   = (0.0, 1.0, 2.0)
 REBAL_LABEL = {"M": "monthly", "W": "weekly", "Q": "quarterly"}
 
 ROOT = Path(__file__).parent
+PRICES_CSV = ROOT / "data" / "universe" / "universe_prices.csv"
+META_CSV = ROOT / "data" / "universe" / "universe_meta.csv"
+# The universe is now TR-native (tools.tr_tradeable --enumerate → tools.build_tr_universe):
+# every live name is tradeable on TR by construction, so there is no separate tradeability filter.
 
 
 def _broker(t: str) -> str:
@@ -48,24 +67,58 @@ def _broker(t: str) -> str:
     return f"{wkn} · {name}" if wkn else name
 
 
+def _disp(meta: dict, t: str) -> str:
+    """Display ticker: the liquid HOME symbol (STX.US → STX), never the dead .F
+    German shadow that keys the row."""
+    m = meta.get(t, {})
+    return str(m.get("home") or t).split(".")[0]
+
+
+def _name(m: dict, t: str) -> str:
+    """Clean display name — EODHD's German listing name often trails the German
+    ticker in parens ('AXT  (AHV.SG)'); strip that, keep real parentheticals."""
+    return re.sub(r"\s*\([A-Z0-9][A-Z0-9.]*\)\s*$", "", str(m.get("name", t))).strip() or t
+
+
 # ── Data assembly ─────────────────────────────────────────────────────────────
 
-def gather(force: bool = False, refresh: bool | None = None) -> dict:
-    # `force` is the live-server convention; `refresh` kept for the CLI flag.
+def _slip(m) -> int:
+    v = m.get("slippage_bps")
+    return int(v) if pd.notna(v) else 30
+
+
+def gather(force: bool = False, refresh: bool | None = None, with_grid: bool = True) -> dict:
+    """Load the survivorship-corrected dataset (survivors ∪ 270 dead), run the
+    walk-forward with the active graveyard, and (when `with_grid`) the 32-config
+    matrix. `force`/`refresh` only re-fetch the benchmark series."""
     refresh = force if refresh is None else refresh
-    prices = fetch_prices(refresh=refresh)
-    slip = {t: UNIVERSE[t]["slippage_bps"] for t in UNIVERSE}
+    prices = pd.read_csv(PRICES_CSV, index_col=0, parse_dates=True)
+    prices = to_xetra_calendar(prices)                         # L&S/XETRA sessions only (tradeable days)
+    prices = winsorize_prices(prices, cap=WINSOR_CAP)          # de-glitch the raw feed
+    meta_df = pd.read_csv(META_CSV)                            # TR-native universe (already tradeable)
+    meta = {r["ticker"]: dict(r) for _, r in meta_df.iterrows()}
+    slip = {t: _slip(m) for t, m in meta.items() if t in prices.columns}
+    pit = PITUniverse(prices, delisting_map(meta_df))
 
-    res = run_momentum(prices, slip, k=K, lookback=LOOKBACK, skip=SKIP,
-                       capital=CAPITAL, cost_mults=COST_MULTS, freq=REBAL,
-                       liq_max=LIQ_MAX, fee_eur=FEE_EUR, min_price=MIN_PRICE)
+    benches = {n: v for n, v in BENCHMARKS.items() if n != "Bitcoin"}   # equities/bonds only
+    bench_tickers = [tk for tk, _ in benches.values()]
+    bench_raw = cached_price_history(bench_tickers, period="9y", force=refresh)
+    bench = bench_raw.rename(columns={tk: name for name, (tk, _) in benches.items()})
+    spx = bench["S&P 500"] if "S&P 500" in bench.columns else bench.iloc[:, 0]
 
-    bench_tickers = [tk for _, (tk, _) in BENCHMARKS.items()]
-    bench_raw = cached_price_history(bench_tickers, period="5y", force=refresh)
-    bench = bench_raw.rename(columns={tk: name for name, (tk, _) in BENCHMARKS.items()})
+    # No sector data on the global universe → sector-neutral (B) configs excluded from the grid.
+    res = run_momentum(prices, slip, k=K, lookback=LOOKBACK, skip=SKIP, capital=CAPITAL,
+                       cost_mults=COST_MULTS, freq=REBAL, liq_max=LIQ_MAX, fee_eur=FEE_EUR,
+                       min_price=MIN_PRICE, start=START, pit=pit, execute_lag=EXEC_LAG)
+    grid = (run_grid(prices, slip, sectors=None, benchmark=spx, pit=pit, start=START,
+                     configs=[c for c in ALL_CONFIGS if not c.sector_neutral],
+                     train_end=TRAIN_END, val_end=VAL_END, capital=CAPITAL,
+                     lookback=LOOKBACK, skip=SKIP, execute_lag=EXEC_LAG)
+            if with_grid else None)
 
-    return dict(prices=prices, res=res, benchmarks=bench, capital=CAPITAL,
-                meta={t: UNIVERSE[t] for t in UNIVERSE})
+    return dict(prices=prices, res=res, benchmarks=bench, capital=CAPITAL, meta=meta,
+                grid=grid, n_dead=int(meta_df["delisting_date"].notna().sum()),
+                n_countries=len({m.get("country") for m in meta.values()} - {"—", None}))
 
 
 def _equity_window(res: dict):
@@ -95,9 +148,9 @@ def sec_holdings(d: dict) -> str:
     cur = log[-1]
     picks = cur["picks"]
     out = ["<h2>Current top picks</h2>"]
-    out.append(f"<p class='dim'>Equal-weight top-{K} as of {cur['date'].date()}, "
-               "ranked by 12-1 momentum score. Each leg shows its broker WKN · name "
-               "so you can find and trade it in the app.</p>")
+    out.append(f"<p class='dim'>Equal-weight top-{len(picks)} as of {cur['date'].date()}, "
+               "ranked by 12-1 momentum score. Each leg shows its home ticker, name and ISIN "
+               "— search the ISIN or name in Trade Republic to trade it.</p>")
     if not picks:
         out.append("<p class='dim'>No eligible names at the latest rebalance.</p>")
         return "".join(out)
@@ -105,16 +158,17 @@ def sec_holdings(d: dict) -> str:
     w = 100.0 / len(picks)
     for t in picks:
         m = d["meta"].get(t, {})
+        home = str(m.get("home") or t).split(".")[0]          # STX.US → STX (search this in TR)
+        isin = m.get("isin") if pd.notna(m.get("isin")) else ""
         rows.append(
-            f"<tr><td class='mono'>{t}</td>"
-            f"<td class='dim' style='font-size:0.8rem'>{_broker(t)}</td>"
+            f"<tr><td class='mono'>{home}</td>"
+            f"<td>{_name(m, t)}</td>"
+            f"<td class='dim mono' style='font-size:0.72rem'>{isin}</td>"
             f"<td>{m.get('country','—')}</td>"
-            f"<td>{m.get('sector','—')}</td>"
             f"<td class='num mono'>{cur['scores'].get(t, float('nan')) * 100:+.1f}%</td>"
             f"<td class='num mono'>{w:.1f}%</td></tr>")
-    out.append("<table><tr><th>Ticker</th><th>Broker (WKN · name)</th><th>Country</th>"
-               "<th>Sector</th><th class='num'>12-1 momentum</th>"
-               "<th class='num'>Weight</th></tr>"
+    out.append("<table><tr><th>Ticker</th><th>Name</th><th>ISIN</th><th>Country</th>"
+               "<th class='num'>12-1 momentum</th><th class='num'>Weight</th></tr>"
                + "".join(rows) + "</table>")
     return "".join(out)
 
@@ -149,11 +203,8 @@ def sec_curve(d: dict) -> str:
                                  name=name, line=dict(width=1.4)))
 
     fig.add_hline(y=100, line_dash="dash", line_color=theme.FG_DIM, line_width=1)
-    fig.update_layout(height=500, yaxis_title="Index (start = 100)",
-                      hovermode="x unified", margin=dict(t=96),   # room for wrapped legend rows
-                      legend=dict(orientation="h", yanchor="bottom", y=1.02,
-                                  xanchor="left", x=0, font=dict(size=11),
-                                  entrywidth=150, entrywidthmode="pixels"))
+    fig.update_layout(height=460, yaxis_title="Index (start = 100)",
+                      hovermode="x unified", margin=dict(t=20))
     out.append(f"<div class='chart'>{fig_html(fig)}</div>")
     return "".join(out)
 
@@ -210,17 +261,22 @@ def sec_rebalance_log(d: dict) -> str:
            + "".join(rows) + "</table></details>")
 
 
-def sec_caveat() -> str:
+def sec_caveat(d: dict) -> str:
+    nc = d.get("n_countries", 0)
     return f"""
 <div class="note warn">
-<b>Survivorship bias — read the result as relative, not absolute.</b> The universe
-is <i>today's</i> listed, liquid, history-verified names ({len(UNIVERSE)} tickers).
-Backtesting on today's survivors overstates returns: names that delisted (and would
-have been bought then dropped along the way) are absent from the data, and today's
-membership is implicitly projected onto the past. The honest comparison is momentum
-<i>vs an equal-weight buy-hold of the same starting universe</i> above, not the
-headline return in isolation. Daily closes only — intraday execution and borrow
-costs (for any future short overlay) are ignored.
+<b>Read the result as relative, not absolute — but not because of survivorship.</b>
+The universe is survivorship-<i>corrected</i> (delisted/collapsed names are carried and
+liquidated by the graveyard, below), and momentum barely feels it anyway: it buys
+<i>winners</i>, so it almost never holds a name into its death. The real reasons the
+headline is optimistic are <b>regime</b> (2023→ was an exceptional momentum tape) and
+<b>concentration</b> (a top-k that a few explosive names dominate, with no sector or
+geographic cap). The universe is the liquid, <b>Trade-Republic-investable</b> set across
+{nc} countries, each priced off its <b>home exchange × EUR FX</b> (the Lang &amp; Schwarz
+model — NVIDIA on NASDAQ, Samsung on KRX, in their own currency converted to EUR), behind a
+≥100k/day turnover floor. Membership uses peak turnover over the whole window, so there is a
+mild liquidity look-ahead, and TR-routability is assumed from liquidity, not verified. Daily
+closes only — intraday execution and borrow costs (for any future short overlay) are ignored.
 </div>"""
 
 
@@ -254,6 +310,102 @@ that truncating future data leaves past scores and past holdings unchanged.</p>
 """
 
 
+def sec_survivorship(d: dict) -> str:
+    n = d.get("n_dead", 0)
+    if not n:
+        return ""
+    return (f'<div class="note warn"><b>Survivorship-corrected.</b> The universe '
+            f'includes <b>{n}</b> EUR-listed names that delisted/died 2018→now '
+            f'(e.g. Wirecard, peak €195 → €0.40), held until their delisting date and '
+            f'liquidated by the graveyard at the last traded price — so the backtest '
+            f'can buy a name that later goes to zero and eat the loss.</div>')
+
+
+def sec_grid(d: dict) -> str:
+    g = d.get("grid")
+    if not g:
+        return ""
+    has_test = any("test" in c for c in g["cells"])
+    rows = []
+    for c in sorted(g["cells"], key=lambda c: c["val"]["sharpe"], reverse=True):
+        test_cells = (f"<td class='num'>{_pct(c['test']['net_return'] * 100)}</td>"
+                      f"<td class='num mono'>{c['test']['sharpe']:.2f}</td>") if has_test else ""
+        rows.append(
+            f"<tr><td class='mono'>{c['code']}</td>"
+            f"<td class='num'>{_pct(c['train']['net_return'] * 100)}</td>"
+            f"<td class='num mono'>{c['train']['sharpe']:.2f}</td>"
+            f"<td class='num'>{_pct(c['val']['net_return'] * 100)}</td>"
+            f"<td class='num mono'>{c['val']['sharpe']:.2f}</td>"
+            f"{test_cells}"
+            f"<td class='num mono'>{c['trades_per_year']:.0f}</td></tr>")
+    test_hdr = "<th class='num'>Test ret</th><th class='num'>Test Sh</th>" if has_test else ""
+    return ("<h2>32-config grid (A·C·D·E·F)</h2>"
+            "<p class='dim'>A vol-adj · C trend-filter · D 10-slot · E quarterly · F lazy "
+            "(B sector-neutral is excluded — no sector data on this universe). Ranked by "
+            "<b>validation</b> Sharpe; train = 2018–21 "
+            "(picks the config), validation = 2022–23, <b>test = 2024→ (held out, never "
+            "informs the pick)</b>. A config you'd trust holds up across all three — "
+            "especially test.</p>"
+            "<table><tr><th>Cfg</th><th class='num'>Train ret</th><th class='num'>Train Sh</th>"
+            "<th class='num'>Val ret</th><th class='num'>Val Sh</th>" + test_hdr +
+            "<th class='num'>Trades/yr</th></tr>" + "".join(rows) + "</table>")
+
+
+def sec_feasibility(d: dict) -> str:
+    g = d.get("grid")
+    if not g:
+        return ""
+    best = max(g["cells"], key=lambda c: c["val"]["sharpe"])
+    f = feasibility(best, capital=d["capital"], fee_eur=FEE_EUR)
+    return (f"<h3>Small-account feasibility (best val cell {best['code']})</h3>"
+            f"<p class='dim'>{best['trades_per_year']:.0f} trades/yr × €{FEE_EUR:.0f} = "
+            f"€{f['annual_fee_eur']:.0f}/yr = {f['fee_drag_pct']:.2f}% of €{d['capital']:,.0f}. "
+            f"Pays for itself: <b>{'yes' if f['pays_for_itself'] else 'no'}</b>.</p>")
+
+
+def _pnl_color(ret: float, dead: bool) -> str:
+    if dead:
+        return "#000000"                  # defaulted / delisted
+    if ret >= 0.20:
+        return "#0a6b00"                  # a lot positive
+    if ret >= 0.0:
+        return "#46c84e"                  # positive
+    if ret > -0.20:
+        return "#ef4444"                  # negative
+    return "#7a0000"                       # a lot negative
+
+
+def sec_timelines(d: dict) -> str:
+    g = d.get("grid")
+    if not g:
+        return ""
+    blocks = []
+    for c in sorted(g["cells"], key=lambda c: c["val"]["sharpe"], reverse=True):
+        lines = []
+        for row in c["timeline"]:
+            dead = set(row["dead"])
+            spans = " ".join(
+                f"<span style='color:{_pnl_color(r, t in dead)}' "
+                f"title='{t} {r:+.0%}'>{_disp(d['meta'], t)}</span>"
+                for t, r in row["ret"].items())
+            spans = spans or "<span class='dim'>cash</span>"
+            rv = [v for v in row["ret"].values() if pd.notna(v)]
+            mret = sum(rv) / len(rv) if rv else 0.0
+            lines.append(f"<div><span class='mono dim'>{row['date']}</span> "
+                         f"<b style='color:{_pnl_color(mret, False)}'>{mret:+.1%}</b> {spans}</div>")
+        blocks.append(
+            f"<details><summary>{c['code']} · val Sharpe {c['val']['sharpe']:.2f} · "
+            f"{c['trades_per_year']:.0f} tr/yr</summary>"
+            f"<div style='font-size:0.78rem;line-height:1.7'>{''.join(lines)}</div></details>")
+    return ("<h2>Monthly picks per variation</h2>"
+            "<p class='dim'>Each line is one rebalance's equal-weight picks, colored by that "
+            "holding period's return — <span style='color:#0a6b00'>■</span> ≥+20% · "
+            "<span style='color:#46c84e'>■</span> up · <span style='color:#ef4444'>■</span> down · "
+            "<span style='color:#7a0000'>■</span> ≤−20% · <span style='color:#000'>■</span> "
+            "defaulted. Hover a ticker for its %. All 64 variations, collapsed.</p>"
+            + "".join(blocks))
+
+
 # ── Assembly ──────────────────────────────────────────────────────────────────
 
 def build(d: dict, public: bool = False) -> str:
@@ -270,7 +422,11 @@ def build(d: dict, public: bool = False) -> str:
         sec_curve(d),
         sec_stats(d, public),
         sec_rebalance_log(d),
-        sec_caveat(),
+        sec_caveat(d),
+        sec_survivorship(d) if not public else "",
+        sec_grid(d) if not public else "",
+        sec_feasibility(d) if not public else "",
+        sec_timelines(d) if not public else "",
         sec_method(),
     ])
     return page(title, body)
@@ -285,15 +441,12 @@ def main():
     print("gathering momentum data (yfinance)...")
     d = gather(refresh=args.refresh)
 
+    # The momentum lab is now the lower half of the Strategy page; this standalone
+    # build is debug-only and writes the local snapshot only (no docs/ export).
     local = ROOT / "local/momentum.html"
     local.parent.mkdir(exist_ok=True)
     local.write_text(build(d, public=False))
-    print(f"wrote {local}")
-
-    pub = ROOT / "docs/momentum.html"
-    pub.parent.mkdir(exist_ok=True)
-    pub.write_text(build(d, public=True))
-    print(f"wrote {pub}  (percentages only)")
+    print(f"wrote {local}  (debug; the live lab is the Strategy page's lower half)")
 
     if args.open:
         webbrowser.open(local.as_uri())

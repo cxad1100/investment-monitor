@@ -21,7 +21,8 @@ from urllib.parse import urlparse, parse_qs
 
 import build_report as B
 import build_pairs_report as P
-import build_momentum_report as M
+import build_scenarios_report as S
+import build_strategy_report as ST   # the Strategy page folds the momentum lab in as its lower half
 
 PORT = 8000
 
@@ -29,14 +30,16 @@ PORT = 8000
 PAGES = {
     "main":     dict(loader="/",         build="/report",          snap=B.ROOT / "local/report.html"),
     "pairs":    dict(loader="/pairs",    build="/pairs-report",    snap=P.ROOT / "local/pairs.html"),
-    "momentum": dict(loader="/momentum", build="/momentum-report", snap=M.ROOT / "local/momentum.html"),
+    "strategy": dict(loader="/strategy", build="/strategy-report", snap=ST.ROOT / "local/strategy.html"),
+    "scenarios": dict(loader="/scenarios", build="/scenarios-report", snap=S.ROOT / "local/scenarios.html"),
 }
 
-# cross-page nav links shown in the top bar, in display order
+# cross-page nav links shown in the top bar, in display order.
+# Pairs / Momentum-lab / Scenarios routes still exist (PAGES below) but are
+# unlinked — the live site is just Portfolio + the chosen Strategy.
 _NAV = [
     ("main",     "/",         "Portfolio"),
-    ("pairs",    "/pairs",    "Pairs Lab"),
-    ("momentum", "/momentum", "Momentum"),
+    ("strategy", "/strategy", "Strategy"),
 ]
 
 
@@ -50,14 +53,20 @@ body{{background:#1e1e1e;color:#d4d4d4;margin:0;height:100vh;display:flex;flex-d
 .sp{{width:40px;height:40px;border:3px solid #2d2d2d;border-top-color:#569cd6;border-radius:50%;
  animation:s .8s linear infinite}}@keyframes s{{to{{transform:rotate(360deg)}}}}
 p{{color:#808080;font-size:14px;margin-top:16px}}
-iframe{{position:fixed;inset:0;width:100%;height:100%;border:0;display:none;background:#1e1e1e}}
+iframe{{position:fixed;inset:0;width:100%;height:100%;border:0;background:#1e1e1e;
+ opacity:0;pointer-events:none}}
 </style></head><body>
-<div class="sp" id="spin"></div><p id="msg">Loading…</p>
 <iframe id="f" src="{build_path}"></iframe>
+<div class="sp" id="spin"></div><p id="msg">Loading…</p>
 <script>
+// Render the iframe at full viewport width (opacity:0, NOT display:none) so Plotly
+// measures real widths while building — a display:none iframe has zero width and clips
+// every legend box to one char. Reveal + nudge a resize once the report has loaded.
 var f=document.getElementById('f');
 f.onload=function(){{document.getElementById('spin').style.display='none';
- document.getElementById('msg').style.display='none';f.style.display='block';}};
+ document.getElementById('msg').style.display='none';
+ f.style.opacity='1';f.style.pointerEvents='auto';
+ try{{f.contentWindow.dispatchEvent(new Event('resize'));}}catch(e){{}}}};
 f.onerror=function(){{document.getElementById('msg').textContent='Build failed — see terminal.';}};
 </script></body></html>"""
 
@@ -136,9 +145,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 d = P.gather(force=force)
                 html = P.build(d, public=False)
                 stale, as_of = None, None
-            else:
-                d = M.gather(force=force)
-                html = M.build(d, public=False)
+            elif page == "strategy":
+                d = ST.gather(force=force)
+                html = ST.build(d, public=False)
+                stale, as_of = None, None
+            else:  # scenarios (local-only)
+                d = S.gather(force=force)
+                html = S.build(d, public=False)
                 stale, as_of = None, None
             cfg["snap"].write_text(html)            # keep last-good snapshot fresh
             html = _inject(html, page, as_of=as_of, stale=stale)
@@ -163,14 +176,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(_loader("/report" + ("?force=1" if force else "")))
         elif path == "/pairs":
             self._send(_loader("/pairs-report" + ("?force=1" if force else "")))
-        elif path == "/momentum":
-            self._send(_loader("/momentum-report" + ("?force=1" if force else "")))
+        elif path == "/strategy":
+            self._send(_loader("/strategy-report" + ("?force=1" if force else "")))
+        elif path == "/scenarios":
+            self._send(_loader("/scenarios-report" + ("?force=1" if force else "")))
         elif path == "/report":
             self._serve_report("main", force)
         elif path == "/pairs-report":
             self._serve_report("pairs", force)
-        elif path == "/momentum-report":
-            self._serve_report("momentum", force)
+        elif path == "/strategy-report":
+            self._serve_report("strategy", force)
+        elif path == "/scenarios-report":
+            self._serve_report("scenarios", force)
         else:
             self.send_error(404)
 

@@ -43,11 +43,12 @@ _TEMPLATE = go.layout.Template(
         colorway=PALETTE,
         xaxis=dict(gridcolor=GRID, zerolinecolor=GRID, linecolor=GRID),
         yaxis=dict(gridcolor=GRID, zerolinecolor=GRID, linecolor=GRID),
-        # entrywidth gives each legend item a fixed-width slot so a horizontal
-        # legend with many series spaces out and WRAPS to multiple rows instead of
-        # packing the labels on top of each other (the trimmed/overlapping legend).
-        legend=dict(bgcolor="rgba(30,30,30,0.85)", bordercolor=GRID, borderwidth=1,
-                    font=dict(size=11), entrywidth=150, entrywidthmode="pixels"),
+        # Vertical, stacked, anchored inside the top-left. Horizontal legends collapse
+        # their entry widths when the webfont paints late (labels overlap — "OptimizedEqual-We");
+        # a vertical legend stacks one-per-row with guaranteed spacing, no font-timing race.
+        legend=dict(orientation="v", x=0.01, y=0.99, xanchor="left", yanchor="top",
+                    bgcolor="rgba(30,30,30,0.85)", bordercolor=GRID, borderwidth=1,
+                    font=dict(size=11)),
         hoverlabel=dict(bgcolor="#2d2d30", bordercolor=GRID,
                         font=dict(family=MONO, color=FG, size=12)),
         margin=dict(t=20, b=40, l=50, r=20),

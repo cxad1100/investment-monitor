@@ -1,0 +1,138 @@
+import numpy as np
+import pandas as pd
+
+from tools.dead_stocks import parse_index_changes, classify_dead, keep_real
+
+
+def test_parse_index_changes_keeps_removals_only():
+    rows = [
+        {"date": "2020-08-24", "action": "removed", "ticker": "WDI.DE", "name": "Wirecard"},
+        {"date": "2021-03-22", "action": "added",   "ticker": "ZAL.DE", "name": "Zalando"},
+        {"date": "2022-01-24", "action": "deleted", "ticker": "XYZ.DE", "name": "Xyz"},
+    ]
+    out = parse_index_changes(rows)
+    assert [r["ticker"] for r in out] == ["WDI.DE", "XYZ.DE"]           # removals only
+    assert out[0]["removal_date"] == pd.Timestamp("2020-08-24")
+
+
+def test_classify_dead_when_prices_stop():
+    idx = pd.bdate_range("2019-01-01", periods=400)
+    s = pd.Series(list(np.linspace(50, 2, 200)) + [np.nan] * 200, index=idx)  # stops mid
+    today = idx[-1]
+    dl = classify_dead(s, removal_date=idx[195], today=today, gap_days=20)
+    assert dl == idx[199]                                  # last real bar = delisting
+
+
+def test_classify_dead_rejects_still_trading():
+    idx = pd.bdate_range("2019-01-01", periods=400)
+    s = pd.Series(np.linspace(50, 80, 400), index=idx)     # never stops
+    assert classify_dead(s, removal_date=idx[100], today=idx[-1]) is None
+
+
+def test_keep_real_filters_penny_and_wide_spread():
+    cands = [
+        {"ticker": "WDI.DE", "last_price": 1.50, "spread_pct": 0.30},     # ok
+        {"ticker": "PENNY",  "last_price": 0.40, "spread_pct": 0.30},     # < €1 -> drop
+        {"ticker": "WIDE",   "last_price": 5.00, "spread_pct": 2.50},     # > 1.5% -> drop
+        {"ticker": "NOPX",   "last_price": None, "spread_pct": 0.30},     # missing -> drop
+    ]
+    kept = {c["ticker"] for c in keep_real(cands, min_price=1.0, max_spread_pct=1.5)}
+    assert kept == {"WDI.DE"}
+
+
+from tools.dead_stocks import build_dead_table
+
+
+def _fake_history(ticker):
+    # WDI.DE dies; ALIVE.DE keeps trading to today
+    idx = pd.bdate_range("2019-01-01", periods=400)
+    if ticker == "WDI.DE":
+        return pd.Series(list(np.linspace(100, 1.5, 200)) + [np.nan] * 200, index=idx)
+    return pd.Series(np.linspace(20, 40, 400), index=idx)
+
+
+def test_build_dead_table_from_seed_classifies_and_filters():
+    seed = [
+        {"ticker": "WDI.DE", "name": "Wirecard", "sector": "Internet & Software",
+         "removal_date": "2019-10-01", "spread_pct": 0.30},
+        {"ticker": "ALIVE.DE", "name": "Still Trading", "sector": "Vehicles",
+         "removal_date": "2019-06-01", "spread_pct": 0.30},
+    ]
+    today = pd.bdate_range("2019-01-01", periods=400)[-1]
+    table, prices = build_dead_table(seed, fetch_history=_fake_history, today=today)
+    assert list(table["ticker"]) == ["WDI.DE"]            # ALIVE.DE rejected (not dead)
+    assert pd.notna(table.iloc[0]["delisting_date"])
+    assert "WDI.DE" in prices.columns
+    # dead column is truncated at delisting (no data after)
+    dl = pd.Timestamp(table.iloc[0]["delisting_date"])
+    assert prices["WDI.DE"].dropna().index[-1] == dl
+
+
+def test_build_dead_table_collapse_filter_excludes_withdrawals():
+    idx = pd.bdate_range("2019-01-01", periods=300)
+
+    def fh(t):
+        if t == "COLLAPSE":
+            return pd.Series(list(np.linspace(100, 5, 200)) + [np.nan] * 100, index=idx)
+        return pd.Series(list(np.linspace(100, 90, 200)) + [np.nan] * 100, index=idx)  # withdrawal
+
+    seed = [{"ticker": "COLLAPSE", "removal_date": "2019-06-01"},
+            {"ticker": "WITHDRAW", "removal_date": "2019-06-01"}]
+    table, _ = build_dead_table(seed, fetch_history=fh, today=idx[-1], max_survival_ratio=0.5)
+    assert list(table["ticker"]) == ["COLLAPSE"]    # withdrawal last/peak=0.9 > 0.5 → excluded
+
+
+def test_build_dead_table_concurrent_matches_sequential():
+    idx = pd.bdate_range("2019-01-01", periods=300)
+
+    def fh(t):
+        return pd.Series(list(np.linspace(100, 5, 200)) + [np.nan] * 100, index=idx)
+
+    seed = [{"ticker": f"D{i}", "removal_date": "2019-06-01"} for i in range(6)]
+    a, _ = build_dead_table(seed, fetch_history=fh, today=idx[-1], max_workers=1)
+    b, _ = build_dead_table(seed, fetch_history=fh, today=idx[-1], max_workers=4)
+    assert list(a["ticker"]) == list(b["ticker"]) == [f"D{i}" for i in range(6)]
+
+
+from tools.dead_stocks import is_clean_dead
+
+
+def _idx(n):
+    return pd.bdate_range("2019-01-01", periods=n)
+
+
+def test_is_clean_dead_keeps_real_crash_rejects_glitches():
+    # a real death: smooth-ish decline WITH a brutal −70% crash day (Wirecard-style) → KEEP
+    crash = list(np.linspace(100, 30, 380)) + [9.0]               # −70% last bar
+    s = pd.Series(crash, index=_idx(381))
+    assert is_clean_dead(s, min_obs=378) is True
+
+    # split/glitch: a single +150% up-day (unadjusted split / bad print) → REJECT
+    g = list(np.linspace(50, 40, 380)); g[200] = g[199] * 2.5
+    assert is_clean_dead(pd.Series(g, index=_idx(380)), min_obs=378) is False
+
+    # zero-price print (division glitch) → REJECT
+    z = list(np.linspace(50, 40, 380)); z[100] = 0.0
+    assert is_clean_dead(pd.Series(z, index=_idx(380)), min_obs=378) is False
+
+    # too short (<1.5y of bars) → REJECT
+    assert is_clean_dead(pd.Series(np.linspace(50, 5, 100), index=_idx(100)), min_obs=378) is False
+
+    # perpetual penny (peak < €1) → REJECT
+    assert is_clean_dead(pd.Series(np.linspace(0.8, 0.2, 380), index=_idx(380)), min_obs=378) is False
+
+
+def test_build_dead_table_rejects_split_glitch_keeps_clean_crash():
+    idx = _idx(420)
+
+    def fh(t):
+        if t == "GLITCH":                       # collapses but has a +200% split-day → drop
+            v = list(np.linspace(100, 5, 400)); v[150] = v[149] * 3.0
+            return pd.Series(v + [np.nan] * 20, index=idx)
+        return pd.Series(list(np.linspace(100, 5, 400)) + [np.nan] * 20, index=idx)  # clean crash
+
+    seed = [{"ticker": "GLITCH", "removal_date": "2019-06-01"},
+            {"ticker": "CLEAN", "removal_date": "2019-06-01"}]
+    table, _ = build_dead_table(seed, fetch_history=fh, today=idx[-1],
+                                max_survival_ratio=0.5, clean=True, min_obs=378)
+    assert list(table["ticker"]) == ["CLEAN"]

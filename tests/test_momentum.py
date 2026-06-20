@@ -2,7 +2,33 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from tools.momentum import rebalance_dates, momentum_scores, eligible, select_topk
+from tools.momentum import (rebalance_dates, momentum_scores, eligible, select_topk,
+                            winsorize_prices, _exec_date)
+
+
+def test_winsorize_caps_glitch_spikes_keeps_clean_column():
+    idx = pd.bdate_range("2020-01-01", periods=12)
+    clean = pd.Series(np.linspace(100, 112, 12), index=idx)
+    glitch = clean.copy()
+    glitch.iloc[6] = glitch.iloc[5] * 10.0                 # +900% split glitch
+    w = winsorize_prices(pd.DataFrame({"CLEAN": clean, "GLITCH": glitch}), cap=0.5)
+    assert np.allclose(w["CLEAN"].values, clean.values)    # clean column untouched
+    assert w["GLITCH"].pct_change().dropna().max() <= 0.5 + 1e-9   # spike capped
+
+
+def test_winsorize_preserves_dead_tail_nan():
+    idx = pd.bdate_range("2020-01-01", periods=10)
+    s = pd.Series(list(np.linspace(100, 50, 6)) + [np.nan] * 4, index=idx)
+    w = winsorize_prices(pd.DataFrame({"D": s}), cap=0.5)
+    assert w["D"].iloc[:6].notna().all() and w["D"].iloc[6:].isna().all()
+
+
+def test_exec_date_lag_shifts_to_next_bar():
+    idx = pd.bdate_range("2020-01-01", periods=5)
+    assert _exec_date(idx, idx[0], 0) == idx[0]            # lag 0 = signal-day close
+    assert _exec_date(idx, idx[0], 1) == idx[1]            # lag 1 = next bar
+    assert _exec_date(idx, idx[2], 1) == idx[3]
+    assert _exec_date(idx, idx[-1], 1) == idx[-1]          # clamps at the end
 
 
 def test_eligible_drops_illiquid_and_short_history():
@@ -33,6 +59,26 @@ def test_select_topk_ranks_and_respects_eligibility():
     assert picks2 == ["A", "C"]                       # k larger than pool is fine
 
 
+def test_select_topk_sector_neutral_round_robin():
+    scores = pd.Series({"A1": 0.9, "A2": 0.8, "A3": 0.7, "B1": 0.6, "C1": 0.5})
+    sectors = {"A1": "Tech", "A2": "Tech", "A3": "Tech", "B1": "Energy", "C1": "Banks"}
+    elig = set(scores.index)
+    picks = select_topk(scores, elig, k=3, sectors=sectors)
+    assert picks == ["A1", "B1", "C1"]               # best of each distinct sector first
+    assert select_topk(scores, elig, k=3) == ["A1", "A2", "A3"]   # plain = global top-3
+
+
+def test_trend_ok_above_below_200d_ma():
+    from tools.momentum import trend_ok
+    idx = pd.bdate_range("2019-01-01", periods=260)
+    up = pd.Series(np.linspace(100.0, 200.0, 260), index=idx)     # last > 200d mean
+    down = pd.Series(np.linspace(200.0, 100.0, 260), index=idx)   # last < 200d mean
+    assert trend_ok(up, idx[-1], ma=200) is True
+    assert trend_ok(down, idx[-1], ma=200) is False
+    short = up.iloc[:50]
+    assert trend_ok(short, short.index[-1], ma=200) is True       # too short → don't gate
+
+
 def test_rebalance_dates_monthly_count():
     idx = pd.bdate_range("2022-01-03", periods=400)   # ~19 months
     dates = rebalance_dates(idx, "M")
@@ -44,6 +90,13 @@ def test_rebalance_dates_monthly_count():
     for d in dates:
         same_month = [x for x in idx if (x.year, x.month) == (d.year, d.month)]
         assert d == same_month[-1]
+
+
+def test_rebalance_dates_quarterly():
+    idx = pd.bdate_range("2020-01-01", periods=520)   # ~2 years
+    q = rebalance_dates(idx, "Q")                       # upgrade E uses freq="Q"
+    assert 6 <= len(q) <= 9                             # ~8 quarter-ends
+    assert all(d in idx for d in q) and q == sorted(q)
 
 
 def _rw(seed, n=400, drift=0.0):
@@ -73,6 +126,16 @@ def test_momentum_scores_insufficient_history_empty():
     idx = pd.bdate_range("2020-01-01", periods=100)
     px = pd.DataFrame({"A": _rw(2, 100)}, index=idx)
     assert momentum_scores(px, idx[-1], lookback=252, skip=21).empty
+
+
+def test_vol_adjust_prefers_lower_vol_same_trend():
+    idx = pd.bdate_range("2020-01-01", periods=300)
+    t = np.arange(300)
+    smooth = np.linspace(100.0, 150.0, 300)                        # same up-trend
+    jagged = np.linspace(100.0, 150.0, 300) + 8.0 * np.sin(t * 1.3)  # + oscillation = higher vol
+    px = pd.DataFrame({"SMOOTH": smooth, "JAGGED": jagged}, index=idx)
+    adj = momentum_scores(px, idx[-1], lookback=252, skip=21, vol_adjust=True)
+    assert adj["SMOOTH"] > adj["JAGGED"]                           # vol-adjust rewards the steady climber
 
 
 from tools.momentum import run_momentum
@@ -113,6 +176,65 @@ def test_run_momentum_no_history_returns_empty_schedule():
     px = pd.DataFrame({"A": np.linspace(100, 110, 100)}, index=idx)
     r = run_momentum(px, {"A": 10}, k=5, cost_mults=(1.0,))
     assert r["holdings_log"] == []
+
+
+def test_run_momentum_start_clips_first_rebalance_without_lookahead():
+    px = _multi()                                    # daily 2019-01 .. ~2020-07
+    slip = {t: 10 for t in px.columns}
+    full = run_momentum(px, slip, k=5, cost_mults=(1.0,))
+    clipped = run_momentum(px, slip, k=5, cost_mults=(1.0,), start="2020-03-01")
+
+    assert full["holdings_log"][0]["date"] < pd.Timestamp("2020-03-01")
+    assert clipped["holdings_log"]                                    # non-empty
+    assert clipped["holdings_log"][0]["date"] >= pd.Timestamp("2020-03-01")
+    # walk-forward: clipping the start changes nothing about the picks on shared dates
+    full_by_date = {h["date"]: h["picks"] for h in full["holdings_log"]}
+    for h in clipped["holdings_log"]:
+        assert h["picks"] == full_by_date[h["date"]]
+
+
+def test_run_momentum_graveyard_liquidates_dead_holding():
+    from tools.universe_pit import PITUniverse
+    idx = pd.bdate_range("2019-01-01", periods=400)
+    winner = 100.0 * np.cumprod(1 + np.full(400, 0.001))
+    bomb = np.concatenate([np.linspace(100, 300, 300), np.linspace(300, 30, 60),
+                           [np.nan] * 40])
+    px = pd.DataFrame({"WIN": winner, "BOMB": bomb,
+                       "C": np.linspace(100, 90, 400)}, index=idx)
+    slip = {t: 10 for t in px.columns}
+    pit = PITUniverse(px, delisting={"BOMB": idx[359]})           # dies at bar 359
+    r = run_momentum(px, slip, k=2, lookback=200, skip=10, cost_mults=(0.0,), pit=pit)
+    for h in r["holdings_log"]:
+        if h["date"] > idx[359]:
+            assert "BOMB" not in h["picks"]                       # dead → never picked after death
+    assert r["runs"][0.0]["equity"].notna().all()                # no NaN from the dead leg
+    h0 = next(h for h in r["holdings_log"] if h["picks"])
+    assert "ret" in h0 and "dead" in h0                          # timeline data attached
+    assert all(t in h0["ret"] for t in h0["picks"])              # every pick has a period return
+
+
+def test_run_momentum_elig_cache_matches_uncached():
+    from tools.momentum import precompute_eligibility
+    px = _multi()
+    slip = {t: 10 for t in px.columns}
+    dates = [d for d in rebalance_dates(px.index, "M") if len(px.loc[:d]) >= 201]
+    cache = precompute_eligibility(px, slip, dates, min_obs=210)
+    a = run_momentum(px, slip, k=5, lookback=200, skip=10, cost_mults=(1.0,))
+    b = run_momentum(px, slip, k=5, lookback=200, skip=10, cost_mults=(1.0,),
+                     elig_by_date=cache)
+    assert [h["picks"] for h in a["holdings_log"]] == [h["picks"] for h in b["holdings_log"]]
+
+
+def test_run_momentum_score_cache_matches_uncached():
+    from tools.momentum import precompute_scores
+    px = _multi()
+    slip = {t: 10 for t in px.columns}
+    dates = [d for d in rebalance_dates(px.index, "M") if len(px.loc[:d]) >= 201]
+    sc = precompute_scores(px, dates, 200, 10)
+    a = run_momentum(px, slip, k=5, lookback=200, skip=10, cost_mults=(1.0,), vol_adjust=True)
+    b = run_momentum(px, slip, k=5, lookback=200, skip=10, cost_mults=(1.0,),
+                     vol_adjust=True, score_by_date=sc)
+    assert [h["picks"] for h in a["holdings_log"]] == [h["picks"] for h in b["holdings_log"]]
 
 
 from tools.momentum import benchmark_curves, equal_weight_curve
@@ -174,3 +296,19 @@ def test_private_report_builds_nonempty():
     html = bmr.build(d, public=False)
     assert "<html" in html.lower() and "momentum" in html.lower()
     assert "Sharpe" in html
+
+
+def test_grid_sections_local_only():
+    assert hasattr(bmr, "sec_grid") and hasattr(bmr, "sec_survivorship")
+    d = _fake_gather()
+    d["grid"] = None                                   # gather may skip the grid
+    html_pub = bmr.build(d, public=True)
+    assert "64-permutation" not in html_pub            # grid is private-only
+
+
+def test_pnl_color_buckets():
+    assert bmr._pnl_color(0.30, False) == "#0a6b00"    # a lot up → dark green
+    assert bmr._pnl_color(0.05, False) == "#46c84e"    # up → green
+    assert bmr._pnl_color(-0.05, False) == "#ef4444"   # down → red
+    assert bmr._pnl_color(-0.40, False) == "#7a0000"   # a lot down → dark red
+    assert bmr._pnl_color(0.30, True) == "#000000"     # defaulted overrides → black
