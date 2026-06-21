@@ -313,15 +313,25 @@ def sec_vs_portfolio(d: dict, public: bool) -> str:
     if len(eqw) < 5 or len(prw) < 5:
         return ""
     strat = (eqw / eqw.iloc[0] - 1.0) * 100.0          # strategy cumulative ROI % from your start
+    # risk-conscious (vol-targeted) curve over the same window
+    vt = d.get("quant", {}).get("vol_target") or {}
+    rcw = vt.get("equity")
+    rc = None
+    if rcw is not None:
+        rcw = rcw[rcw.index >= start].dropna()
+        if len(rcw) >= 5:
+            rc = (rcw / rcw.iloc[0] - 1.0) * 100.0
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=prw.index, y=prw.values, name="Your portfolio (real)",
                              line=dict(color="#ffffff", width=2.6)))
-    fig.add_trace(go.Scatter(x=strat.index, y=strat.values,
-                             name="Momentum strategy (hypothetical)",
-                             line=dict(color="#dcdcaa", width=2)))
+    fig.add_trace(go.Scatter(x=strat.index, y=strat.values, name="Momentum — raw",
+                             line=dict(color="#dcdcaa", width=1.8)))
+    if rc is not None:
+        fig.add_trace(go.Scatter(x=rc.index, y=rc.values, name="Momentum — risk-conscious",
+                                 line=dict(color="#4ec9b0", width=2.4)))
     fig.add_hline(y=0, line_dash="dash", line_color=theme.FG_DIM)
-    fig.update_layout(height=430, yaxis=dict(title="Cumulative ROI (%)", ticksuffix="%"),
+    fig.update_layout(height=440, yaxis=dict(title="Cumulative ROI (%)", ticksuffix="%"),
                       hovermode="x unified", margin=dict(t=20))
 
     def stat(roi_pct):
@@ -332,21 +342,28 @@ def sec_vs_portfolio(d: dict, public: bool) -> str:
     yrs = max((prw.index[-1] - start).days / 365.25, 1e-9)
     rows = (f"<tr><td>Your portfolio</td><td class='num'>{_pct(pt)}</td>"
             f"<td class='num mono'>{ps:.2f}</td><td class='num'>{_pct(pdd)}</td></tr>"
-            f"<tr><td>Momentum strategy</td><td class='num'>{_pct(st)}</td>"
+            f"<tr><td>Momentum — raw</td><td class='num'>{_pct(st)}</td>"
             f"<td class='num mono'>{ss:.2f}</td><td class='num'>{_pct(sdd)}</td></tr>")
+    if rc is not None:
+        rt, rs, rdd = stat(rc)
+        rows += (f"<tr><td>Momentum — risk-conscious</td><td class='num'>{_pct(rt)}</td>"
+                 f"<td class='num mono'>{rs:.2f}</td><td class='num'>{_pct(rdd)}</td></tr>")
     lead = st - pt
     return (
         "<h2>You vs the strategy</h2>"
         f"<p class='dim'>Same window — since your first trade ({start.date()}, ~{yrs:.1f}y). "
-        "The gold line is what this momentum strategy would have returned over that period "
-        "(lump-sum, hypothetical); white is your actual book. Apples-to-pears (your book is "
-        "cash-flow-timed, the strategy is lump-sum), and the strategy carries every caveat below "
-        "— survivorship especially — so read the gap as indicative, not a verdict.</p>"
+        "<span style='color:#fff'>White</span> = your real book; "
+        "<span style='color:#dcdcaa'>gold</span> = the raw momentum strategy; "
+        "<span style='color:#4ec9b0'>teal</span> = the risk-conscious (vol-targeted) version — all "
+        "hypothetical, lump-sum. Apples-to-pears (your book is cash-flow-timed), and the strategies "
+        "carry every caveat below — survivorship especially — so read the gap as indicative.</p>"
         f"<div class='chart'>{fig_html(fig)}</div>"
         "<table><tr><th>Book</th><th class='num'>Total ROI</th><th class='num'>Sharpe</th>"
         f"<th class='num'>Max DD</th></tr>{rows}</table>"
-        f"<p class='dim'>Over this window the strategy is <b>{_pct(lead)}</b> "
-        f"{'ahead of' if lead >= 0 else 'behind'} your portfolio — before the honest haircuts.</p>")
+        f"<p class='dim'>Over this window the raw strategy is <b>{_pct(lead)}</b> "
+        f"{'ahead of' if lead >= 0 else 'behind'} your portfolio on total return — but watch the "
+        "drawdown and Sharpe columns: the risk-conscious version is the fairer comparison to how "
+        "you actually run money.</p>")
 
 
 def sec_grade(d: dict, public: bool) -> str:
