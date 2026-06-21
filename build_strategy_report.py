@@ -24,7 +24,8 @@ from tools.momentum import (run_momentum, winsorize_prices, to_xetra_calendar,
 from tools.universe_pit import PITUniverse
 from tools.universe_assemble import delisting_map
 from tools.momentum_grid import MomentumConfig, _stats_slice, run_grid, ALL_CONFIGS
-from tools.portfolio_tools import BENCHMARKS
+from tools.portfolio_tools import BENCHMARKS, parse_portfolio
+from tools.portfolio_analytics import build_roi_timeseries
 from tools.data_buffer import cached_price_history
 from build_momentum_report import (
     PRICES_CSV, META_CSV, ROOT, LOOKBACK, SKIP, START, LIQ_MAX, MIN_PRICE, CAPITAL,
@@ -143,8 +144,21 @@ def gather(force: bool = False, refresh: bool | None = None) -> dict:
                  grade=qg.grade(test["sharpe"], dsr["dsr"], mc["p_sharpe"], overlap),
                  isin_overlap=overlap)
 
+    # ── Your real portfolio's ROI (cumulative %), for the head-to-head ──
+    portfolio_roi = None
+    pf_csv = ROOT / "input" / "portfolio.csv"
+    if pf_csv.exists():
+        try:
+            txns = parse_portfolio(pf_csv)["transactions"]
+            pr, _ = build_roi_timeseries(txns)
+            if pr is not None and not pr.empty:
+                portfolio_roi = pr
+        except Exception:
+            portfolio_roi = None
+
     n_countries = len({m.get("country") for m in meta.values()} - {"—", None})
     return dict(prices=prices, res=res, benchmarks=bench, capital=CAPITAL, meta=meta, quant=quant,
+                portfolio_roi=portfolio_roi,
                 strategy=STRATEGY, train=train, val=val, test=test, graveyard_hits=hits,
                 grid=grid, n_dead=int(meta_df["delisting_date"].notna().sum()),
                 n_countries=n_countries,
@@ -236,6 +250,55 @@ def sec_yearly(d: dict, public: bool) -> str:
             "part-years.</p>"
             "<table><tr><th>Year</th><th class='num'>Strategy</th>" + eur_hdr +
             "<th class='num'>S&amp;P 500</th></tr>" + "".join(rows) + "</table>")
+
+
+def sec_vs_portfolio(d: dict, public: bool) -> str:
+    """Head-to-head: your real Trade Republic portfolio vs the momentum strategy over the
+    same window. Private only (it's your actual book)."""
+    pr = d.get("portfolio_roi")
+    if public or pr is None or getattr(pr, "empty", True):
+        return ""
+    eq = d["res"]["runs"][1.0]["equity"]
+    start = pr.index[0]
+    eqw = eq[eq.index >= start].dropna()
+    prw = pr[pr.index >= start].dropna()
+    if len(eqw) < 5 or len(prw) < 5:
+        return ""
+    strat = (eqw / eqw.iloc[0] - 1.0) * 100.0          # strategy cumulative ROI % from your start
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=prw.index, y=prw.values, name="Your portfolio (real)",
+                             line=dict(color="#ffffff", width=2.6)))
+    fig.add_trace(go.Scatter(x=strat.index, y=strat.values,
+                             name="Momentum strategy (hypothetical)",
+                             line=dict(color="#dcdcaa", width=2)))
+    fig.add_hline(y=0, line_dash="dash", line_color=theme.FG_DIM)
+    fig.update_layout(height=430, yaxis=dict(title="Cumulative ROI (%)", ticksuffix="%"),
+                      hovermode="x unified", margin=dict(t=20))
+
+    def stat(roi_pct):
+        m = qg.perf_metrics(1.0 + roi_pct / 100.0)
+        return roi_pct.iloc[-1], m.get("sharpe", 0.0), m.get("max_dd", 0.0) * 100.0
+    pt, ps, pdd = stat(prw)
+    st, ss, sdd = stat(strat)
+    yrs = max((prw.index[-1] - start).days / 365.25, 1e-9)
+    rows = (f"<tr><td>Your portfolio</td><td class='num'>{_pct(pt)}</td>"
+            f"<td class='num mono'>{ps:.2f}</td><td class='num'>{_pct(pdd)}</td></tr>"
+            f"<tr><td>Momentum strategy</td><td class='num'>{_pct(st)}</td>"
+            f"<td class='num mono'>{ss:.2f}</td><td class='num'>{_pct(sdd)}</td></tr>")
+    lead = st - pt
+    return (
+        "<h2>You vs the strategy</h2>"
+        f"<p class='dim'>Same window — since your first trade ({start.date()}, ~{yrs:.1f}y). "
+        "The gold line is what this momentum strategy would have returned over that period "
+        "(lump-sum, hypothetical); white is your actual book. Apples-to-pears (your book is "
+        "cash-flow-timed, the strategy is lump-sum), and the strategy carries every caveat below "
+        "— survivorship especially — so read the gap as indicative, not a verdict.</p>"
+        f"<div class='chart'>{fig_html(fig)}</div>"
+        "<table><tr><th>Book</th><th class='num'>Total ROI</th><th class='num'>Sharpe</th>"
+        f"<th class='num'>Max DD</th></tr>{rows}</table>"
+        f"<p class='dim'>Over this window the strategy is <b>{_pct(lead)}</b> "
+        f"{'ahead of' if lead >= 0 else 'behind'} your portfolio — before the honest haircuts.</p>")
 
 
 def sec_grade(d: dict, public: bool) -> str:
@@ -418,6 +481,7 @@ def build(d: dict, public: bool = False) -> str:
         sec_holdings(d),
         sec_curve(d),
         sec_perf(d, public),
+        sec_vs_portfolio(d, public),
         sec_grade(d, public),
         sec_significance(d, public),
         sec_yearly(d, public),
