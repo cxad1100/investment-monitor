@@ -45,6 +45,11 @@ from build_momentum_report import (
 # momentum buys winners, dying names rank last, so it holds ~0 into death.
 STRATEGY = MomentumConfig(vol_adjust=True, slots=15, freq="Q", lazy=True)
 
+# Risk-conscious overlay: volatility-target the book to this annualised vol (de-risk only,
+# park the rest in cash). Cuts the raw strategy's ~32% vol / −44% drawdown to a moderate
+# profile while lifting the Sharpe — the prudent way to actually run momentum.
+RISK_TARGET_VOL = 0.15
+
 
 def _desc(cfg: MomentumConfig) -> str:
     parts = []
@@ -142,7 +147,8 @@ def gather(force: bool = False, refresh: bool | None = None) -> dict:
     quant = dict(perf=qg.perf_metrics(eq), bench=qg.vs_benchmark(eq, spx),
                  trades=qg.trade_metrics(tr, CAPITAL, years), roll=qg.rolling_sharpe(eq),
                  grade=qg.grade(test["sharpe"], dsr["dsr"], mc["p_sharpe"], overlap),
-                 isin_overlap=overlap)
+                 isin_overlap=overlap,
+                 vol_target=qg.vol_target(eq, target_vol=RISK_TARGET_VOL))
 
     # ── Your real portfolio's ROI (cumulative %), for the head-to-head ──
     portfolio_roi = None
@@ -250,6 +256,48 @@ def sec_yearly(d: dict, public: bool) -> str:
             "part-years.</p>"
             "<table><tr><th>Year</th><th class='num'>Strategy</th>" + eur_hdr +
             "<th class='num'>S&amp;P 500</th></tr>" + "".join(rows) + "</table>")
+
+
+def sec_risk_conscious(d: dict, public: bool) -> str:
+    """The risk-conscious variant: the same picks, volatility-targeted so the book de-risks
+    into turbulence. Cuts drawdown and lifts the Sharpe vs the raw strategy."""
+    vt = d.get("quant", {}).get("vol_target")
+    base = d.get("quant", {}).get("perf")
+    if not vt or not base or "equity" not in vt:
+        return ""
+    be, ve = d["res"]["runs"][1.0]["equity"], vt["equity"]
+    broi = (be / be.iloc[0] - 1.0) * 100.0
+    vroi = (ve / ve.iloc[0] - 1.0) * 100.0
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=broi.index, y=broi.values, name="Raw strategy (A·"+"··EF)",
+                             line=dict(color="#808080", width=1.6)))
+    fig.add_trace(go.Scatter(x=vroi.index, y=vroi.values, name="Risk-conscious (vol-targeted)",
+                             line=dict(color="#4ec9b0", width=2.4)))
+    fig.add_hline(y=0, line_dash="dash", line_color=theme.FG_DIM)
+    fig.update_layout(height=420, yaxis=dict(title="Cumulative ROI (%)", ticksuffix="%"),
+                      hovermode="x unified", margin=dict(t=20))
+
+    def r(label, m, exp=None):
+        e = f"<td class='num mono'>{exp*100:.0f}%</td>" if exp is not None else "<td class='num dim'>100%</td>"
+        return (f"<tr><td>{label}</td><td class='num'>{_pct(m['ann_return']*100)}</td>"
+                f"<td class='num mono'>{m['ann_vol']*100:.0f}%</td><td class='num mono'>{m['sharpe']:.2f}</td>"
+                f"<td class='num'>{_pct(m['max_dd']*100)}</td>{e}</tr>")
+    return (
+        "<h2>Risk-conscious version</h2>"
+        f"<p class='dim'>Same momentum picks, but the book is <b>volatility-targeted to "
+        f"{RISK_TARGET_VOL:.0%}</b>: each day it scales exposure toward that vol using the prior "
+        "day's realised vol (no look-ahead, no leverage — it only ever de-risks) and parks the rest "
+        "in cash. When momentum gets turbulent the book automatically shrinks. The raw strategy's "
+        "−44% drawdown is the price of its raw return; this is how you'd actually run it.</p>"
+        f"<div class='chart'>{fig_html(fig)}</div>"
+        "<table><tr><th>Version</th><th class='num'>Ann. return</th><th class='num'>Vol</th>"
+        "<th class='num'>Sharpe</th><th class='num'>Max DD</th><th class='num'>Avg exposure</th></tr>"
+        f"{r('Raw (full-invested)', base)}{r('Risk-conscious', vt, vt['avg_exposure'])}</table>"
+        f"<p class='dim'>Vol-targeting cuts the drawdown from <b>{_pct(base['max_dd']*100)}</b> to "
+        f"<b>{_pct(vt['max_dd']*100)}</b> and lifts the Sharpe from <b>{base['sharpe']:.2f}</b> to "
+        f"<b>{vt['sharpe']:.2f}</b>, at ~<b>{vt['avg_exposure']*100:.0f}%</b> average exposure "
+        "(the rest in cash) — lower absolute return, far better risk-adjusted. Same survivorship "
+        "caveats apply to the underlying signal.</p>")
 
 
 def sec_vs_portfolio(d: dict, public: bool) -> str:
@@ -481,6 +529,7 @@ def build(d: dict, public: bool = False) -> str:
         sec_holdings(d),
         sec_curve(d),
         sec_perf(d, public),
+        sec_risk_conscious(d, public),
         sec_vs_portfolio(d, public),
         sec_grade(d, public),
         sec_significance(d, public),

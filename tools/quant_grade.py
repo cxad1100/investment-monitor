@@ -92,6 +92,30 @@ def rolling_sharpe(equity: pd.Series, window: int = TD) -> dict:
                 roll_sharpe_pos_frac=float((rs > 0).mean()))
 
 
+def vol_target(equity: pd.Series, target_vol: float = 0.15, lookback: int = 63,
+               cap: float = 1.0) -> dict:
+    """Volatility-targeting overlay (risk-conscious): scale each day's exposure toward a
+    fixed annualised `target_vol` using YESTERDAY's trailing realised vol (no look-ahead),
+    capped at `cap` (1.0 = de-risk only, never lever). The un-deployed fraction sits in cash
+    (earns 0). Returns the new equity curve, the average exposure, and the headline metrics.
+
+    This is the standard institutional drawdown control: when turbulence spikes, the book
+    automatically shrinks; in calm momentum tapes it runs (near-)fully invested."""
+    r = _ret(equity)
+    if len(r) < lookback + 5:
+        return {}
+    realised = r.rolling(lookback).std(ddof=1) * np.sqrt(TD)
+    w = (target_vol / realised).clip(upper=cap)
+    w = w.shift(1).fillna(0.0)                          # use prior day's sizing (no look-ahead)
+    scaled = (r * w).dropna()
+    eq = (1 + scaled).cumprod()
+    eq = eq / eq.iloc[0] * float(equity.dropna().iloc[0])
+    m = perf_metrics(eq)
+    m.update(avg_exposure=float(w.reindex(scaled.index).mean()), target_vol=target_vol)
+    m["equity"] = eq
+    return m
+
+
 def grade(test_sharpe: float, dsr: float, mc_p: float, isin_overlap_frac: float) -> dict:
     """An honest letter grade. The headline OOS numbers earn credit; the uncorrected
     biases dock it. `isin_overlap_frac` = how much of the 'graveyard' actually belongs to

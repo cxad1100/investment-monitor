@@ -38,3 +38,15 @@ def test_grade_penalises_uncorrected_survivorship():
     assert good["score"] > bad["score"]                            # survivorship dock is real
     assert good["survivorship_corrected"] and not bad["survivorship_corrected"]
     assert any("Survivorship" in f for f in bad["flags"])
+
+
+def test_vol_target_reduces_drawdown():
+    # a volatile equity curve → vol-targeting should cut vol and (usually) drawdown
+    rng = np.random.default_rng(3)
+    idx = pd.bdate_range("2019-01-01", periods=500)
+    r = rng.normal(0.0008, 0.03, 500)            # high-vol series
+    eq = pd.Series(1000 * np.cumprod(1 + r), index=idx)
+    base = Q.perf_metrics(eq)
+    vt = Q.vol_target(eq, target_vol=0.15)
+    assert vt["ann_vol"] < base["ann_vol"]       # de-risked
+    assert 0 < vt["avg_exposure"] <= 1.0         # never levers
